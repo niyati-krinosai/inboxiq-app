@@ -1,0 +1,41 @@
+# Deploy InboxIQ API + Postgres to Render (free tier)
+# Dashboard → New → Blueprint → connect this GitHub repo
+
+databases:
+  - name: inboxiq-db
+    plan: free
+    databaseName: inboxiq
+    user: inboxiq
+
+services:
+  - type: web
+    name: inboxiq-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: inboxiq-db
+          property: connectionString
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: TOKEN_ENCRYPTION_KEY
+        generateValue: true
+      - key: FRONTEND_URL
+        value: https://inboxiq-iota.vercel.app
+      - key: CORS_EXTRA_ORIGINS
+        value: https://inboxiq-iota.vercel.app
+      - key: SIMPLE_MODE
+        value: "true"
+      - key: OPENAI_API_KEY
+        sync: false

@@ -1,0 +1,26 @@
+[
+  {
+    "id": "tldr-multi-article",
+    "html": "<h2>OpenAI launches GPT-5</h2><p>OpenAI announced GPT-5 today with improved reasoning.</p><hr><h2>Anthropic releases Claude 4</h2><p>Anthropic unveiled Claude 4 with 1M context.</p><hr><h2>New MCP servers</h2><p>Three new MCP servers launched this week.</p>",
+    "subject": "TLDR AI",
+    "expected_articles_min": 2,
+    "expected_entities": ["OpenAI", "Anthropic"],
+    "expected_categories": ["AI"]
+  },
+  {
+    "id": "single-announcement",
+    "html": "<h1>vLLM 0.5 Released</h1><p>vLLM 0.5 adds speculative decoding support for faster inference.</p>",
+    "subject": "Release Notes",
+    "expected_articles_min": 1,
+    "expected_entities": ["vLLM"],
+    "expected_categories": ["Inference"]
+  },
+  {
+    "id": "funding-round",
+    "html": "<h2>Startup X raises $50M Series B</h2><p>AI infrastructure startup X raised funding led by Sequoia.</p><hr><h2>New GPU cluster</h2><p>Cloud provider Y announced 10,000 H100 GPUs.</p>",
+    "subject": "Morning Brew",
+    "expected_articles_min": 2,
+    "expected_entities": [],
+    "expected_categories": ["Funding"]
+  }
+]
