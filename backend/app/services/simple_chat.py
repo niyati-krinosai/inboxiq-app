@@ -198,6 +198,25 @@ def _title_match_ratio(title: str, q_tokens: set[str]) -> float:
     return hits / len(q_tokens)
 
 
+def _title_phrase_boost(title: str, subject: str) -> float:
+    """Strong match when the user pastes or names a specific headline (any story)."""
+    if not title or not subject or len(subject) < 12:
+        return 0.0
+    norm = lambda s: re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+    subj = norm(subject)
+    tit = norm(title)
+    if not subj or not tit:
+        return 0.0
+    if subj in tit or tit in subj:
+        return 1.0
+    subj_words = [w for w in subj.split() if len(w) >= 4]
+    if len(subj_words) >= 3:
+        hits = sum(1 for w in subj_words if w in tit)
+        if hits / len(subj_words) >= 0.6:
+            return 0.85
+    return 0.0
+
+
 def _score_article(
     article: Article,
     question: str,
@@ -205,6 +224,7 @@ def _score_article(
     static_mode: str | None,
     theme_keywords: list[str],
     intent: str,
+    story_subject: str = "",
 ) -> float:
     blob = f"{article.title} {article.content_text or ''} {' '.join(article.categories or [])}".lower()
     title_blob = (article.title or "").lower()
@@ -217,7 +237,8 @@ def _score_article(
         overlap += title_hits * 0.2
 
     title_ratio = _title_match_ratio(article.title or "", q_tokens)
-    title_boost = title_ratio * (0.8 if intent == "elaborate" else 0.35)
+    phrase_boost = _title_phrase_boost(article.title or "", story_subject or question)
+    title_boost = max(title_ratio * (0.8 if intent == "elaborate" else 0.35), phrase_boost)
 
     mode_boost = 0.0
     if static_mode and _topic_matches(article, [static_mode], []):
@@ -365,6 +386,7 @@ async def simple_chat(
     static_mode, newsletter_id, theme_keywords = parse_mode_filter(category_filter)
     nl_from_question = _infer_newsletter_from_question(question)
 
+    story_subject = _extract_story_subject(question)
     search_question = _extract_focus_query(question) if intent == "elaborate" else question
     q_tokens = _query_tokens(search_question)
 
@@ -386,6 +408,7 @@ async def simple_chat(
         db=db,
         user_id=user_id,
         question=search_question,
+        story_subject=story_subject,
         q_tokens=q_tokens,
         cutoff=cutoff,
         intent=intent,
@@ -405,6 +428,7 @@ async def _fetch_articles(
     db: AsyncSession,
     user_id: uuid.UUID,
     question: str,
+    story_subject: str,
     q_tokens: set[str],
     cutoff: datetime,
     intent: str,
@@ -458,12 +482,13 @@ async def _fetch_articles(
         key=lambda r: _score_article(
             r[0], question, q_tokens,
             soft_mode or static_mode, soft_theme or theme_keywords, intent,
+            story_subject,
         ),
         reverse=True,
     )
 
     scores = [
-        _score_article(r[0], question, q_tokens, soft_mode or static_mode, soft_theme or theme_keywords, intent)
+        _score_article(r[0], question, q_tokens, soft_mode or static_mode, soft_theme or theme_keywords, intent, story_subject)
         for r in ranked
     ]
 
