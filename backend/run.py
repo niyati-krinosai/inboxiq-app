@@ -1,12 +1,12 @@
 """Production entrypoint — fixes Render/Railway postgres URL for asyncpg."""
 import os
 
+from app.config import normalize_database_url
+
 if __name__ == "__main__":
     db_url = os.environ.get("DATABASE_URL", "")
-    if db_url.startswith("postgres://"):
-        os.environ["DATABASE_URL"] = db_url.replace(
-            "postgres://", "postgresql+asyncpg://", 1
-        )
+    if db_url:
+        os.environ["DATABASE_URL"] = normalize_database_url(db_url)
 
     import uvicorn
 

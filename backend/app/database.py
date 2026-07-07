@@ -9,11 +9,16 @@ from app.config import get_settings
 
 settings = get_settings()
 
+_connect_args: dict = {}
+if "render.com" in settings.database_url:
+    _connect_args["ssl"] = True
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     pool_pre_ping=True,
     poolclass=NullPool,
+    connect_args=_connect_args,
 )
 
 AsyncSessionLocal = async_sessionmaker(
