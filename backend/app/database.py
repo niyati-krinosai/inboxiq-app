@@ -1,7 +1,8 @@
+import ssl
 from collections.abc import AsyncGenerator
-from typing import Optional
+from urllib.parse import urlparse
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 
@@ -9,16 +10,21 @@ from app.config import get_settings
 
 settings = get_settings()
 
-_connect_args: dict = {}
-if "render.com" in settings.database_url:
-    _connect_args["ssl"] = True
+
+def _connect_args(database_url: str) -> dict:
+    """Render external Postgres needs SSL; internal same-region links do not."""
+    host = urlparse(database_url).hostname or ""
+    if host.endswith(".postgres.render.com"):
+        return {"ssl": ssl.create_default_context()}
+    return {}
+
 
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     pool_pre_ping=True,
     poolclass=NullPool,
-    connect_args=_connect_args,
+    connect_args=_connect_args(settings.database_url),
 )
 
 AsyncSessionLocal = async_sessionmaker(

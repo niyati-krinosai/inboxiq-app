@@ -9,12 +9,13 @@ from app.api.knowledge import router as knowledge_router
 from app.api.operations import router as operations_router
 from app.api.routes import router
 from app.config import get_settings
-from app.core.logging import setup_logging
+from app.core.logging import get_logger, setup_logging
 from app.core.rate_limit_api import RateLimitMiddleware
 from app.database import engine
 
 settings = get_settings()
 setup_logging()
+log = get_logger(__name__)
 
 
 def _cors_origins() -> list[str]:
@@ -27,7 +28,10 @@ def _cors_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        try:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        except Exception as exc:
+            log.warning("pgvector_unavailable", error=str(exc))
         from app.database import Base
         from app.models import (  # noqa: F401
             Article,

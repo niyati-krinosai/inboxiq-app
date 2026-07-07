@@ -1,6 +1,7 @@
 from functools import lru_cache
+from urllib.parse import urlparse
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +30,13 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_db_url(cls, v: str) -> str:
         return normalize_database_url(v)
+
+    @model_validator(mode="after")
+    def _validate_db_host(self) -> "Settings":
+        host = urlparse(self.database_url).hostname
+        if not host:
+            raise ValueError("DATABASE_URL is missing a hostname — use the External Database URL from Render Postgres")
+        return self
 
     # Redis / Celery
     redis_url: str = "redis://localhost:6379/0"
