@@ -69,26 +69,39 @@ def get_conversation_turns(session: ChatSession | None) -> list[dict]:
     return turns
 
 
-def is_followup_question(question: str, session: ChatSession | None) -> bool:
+def should_answer_about_active_article(
+    question: str,
+    session: ChatSession | None,
+    *,
+    pinned_article_id: uuid.UUID | None = None,
+) -> bool:
+    if pinned_article_id:
+        return True
     if not get_active_article(session):
         return False
     q = question.strip()
-    if len(q) < 3:
-        return False
     if _NEW_TOPIC_PATTERNS.search(q):
         return False
     if len(q) >= 80 and re.search(r"\b(tell me|elaborate|detailed news)\b", q, re.I):
         return False
-    lower = q.lower()
-    words = lower.split()
-    if _FOLLOWUP_PATTERNS.search(lower):
-        return True
-    if len(words) <= 20 and re.match(
-        r"^(what|why|how|when|where|who|does|do|is|are|can|will|would|could|explain)\b",
-        lower,
-    ):
-        return True
-    return len(words) <= 8
+    return True
+
+
+def is_followup_question(question: str, session: ChatSession | None) -> bool:
+    return should_answer_about_active_article(question, session)
+
+
+async def clear_active_article(db: AsyncSession, session: ChatSession) -> None:
+    messages = list(session.messages or [])
+    messages.append({
+        "role": "assistant",
+        "headline": "Article context cleared",
+        "content": "",
+        "active_article": None,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+    session.messages = messages[-50:]
+    await db.flush()
 
 
 async def update_session_memory(

@@ -79,6 +79,8 @@ class ChatRequest(BaseModel):
     category: str | None = None
     timeline: str | None = None
     session_id: UUID | None = None
+    article_id: UUID | None = None
+    clear_article_context: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -96,6 +98,7 @@ class ChatResponse(BaseModel):
     is_breaking: bool | None = None
     is_trending: bool | None = None
     session_id: str | None = None
+    active_article: dict | None = None
     timeline_synthesis: list | None = None
     evolution_summary: str | None = None
     explanation: dict | None = None

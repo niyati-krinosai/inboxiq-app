@@ -87,7 +87,7 @@ async def answer_article_question(
             model=settings.openai_model,
             messages=messages,
             temperature=0.35,
-            max_tokens=900,
+            max_tokens=1200,
         )
         text = (response.choices[0].message.content or "").strip()
         return text or _fallback_answer(article, newsletter_name, question, context)

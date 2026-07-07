@@ -13,11 +13,11 @@ log = get_logger(__name__)
 client = create_openai_client()
 
 DIGEST_SENTENCES = 6
-ELABORATE_SENTENCES = 24
+ELABORATE_SENTENCES = 40
 DIGEST_MAX_CHARS = 900
-ELABORATE_MAX_CHARS = 4500
-LLM_BATCH_SIZE = 6
-ELABORATE_MAX_TOKENS = 1600
+ELABORATE_MAX_CHARS = 8000
+LLM_BATCH_SIZE = 4
+ELABORATE_MAX_TOKENS = 3200
 
 _JUNK_LINE = re.compile(
     r"(unsubscribe|view in browser|read online|sponsor|advertisement|"
@@ -234,9 +234,10 @@ async def _llm_batch(articles: list[Article], depths: list[str]) -> list[str]:
                     "You summarize newsletter news stories for a personal reading app. "
                     "Return only valid JSON: {\"summaries\": [{\"id\": 0, \"summary\": \"...\"}]}. "
                     "For depth=digest: 4-6 sentences, concise overview. "
-                    "For depth=elaborate: write a thorough personalized deep-dive in 4-8 paragraphs. "
-                    "Cover what happened, background, key players, technical and business implications, "
-                    "limitations, and why it matters to someone following this space. "
+                    "For depth=elaborate: write a comprehensive personalized deep-dive of "
+                    "20-30 lines (8-12 short paragraphs). Cover what happened, background, "
+                    "key players, technical and business implications, comparisons to "
+                    "existing approaches, limitations, and why it matters. "
                     "Use specific facts from the article. No bullet points or markdown."
                 ),
             },

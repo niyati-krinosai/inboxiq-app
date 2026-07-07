@@ -162,43 +162,33 @@ export interface Newsletter {
 
 
 export interface ChatArticleItem {
-
+  article_id?: string;
   title: string;
-
   summary: string;
-
   url: string | null;
-
   newsletter: string;
-
   published_at?: string | null;
-
 }
 
-
+export interface PinnedArticle {
+  article_id: string;
+  title: string;
+  url?: string | null;
+  newsletter?: string;
+}
 
 export interface ChatResponse {
-
   headline: string;
-
   brief_summary: string;
-
   why_it_matters?: string;
-
   technical_impact?: string | null;
-
   business_impact?: string | null;
-
   sources: { newsletter: string; url: string | null }[];
-
   official_link?: string | null;
-
   related_news: string[];
-
   items?: ChatArticleItem[];
-
   session_id?: string | null;
-
+  active_article?: PinnedArticle | null;
 }
 
 
@@ -270,19 +260,23 @@ export const api = {
 
   },
 
-  chat: (question: string, category?: string, timeline?: string, sessionId?: string) =>
-
+  chat: (
+    question: string,
+    category?: string,
+    timeline?: string,
+    sessionId?: string,
+    options?: { articleId?: string; clearArticleContext?: boolean }
+  ) =>
     apiFetch<ChatResponse>("/chat", {
-
       method: "POST",
-
       body: JSON.stringify({
         question,
         category,
         timeline,
         session_id: sessionId ?? null,
+        article_id: options?.articleId ?? null,
+        clear_article_context: options?.clearArticleContext ?? false,
       }),
-
     }),
 
   getNewsletters: () => apiFetch<Newsletter[]>("/newsletters"),

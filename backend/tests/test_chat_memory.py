@@ -33,6 +33,7 @@ def test_get_active_article_from_session():
 def test_followup_question_detected():
     session = _session_with_active_article()
     assert is_followup_question("Why is it not compatible with the Write API?", session) is True
+    assert is_followup_question("so what makes it different from what already exist", session) is True
     assert is_followup_question("What about autonomous posting?", session) is True
 
 

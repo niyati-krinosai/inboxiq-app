@@ -13,10 +13,11 @@ from app.models.newsletter import Newsletter
 from app.services.article_qa import answer_article_question
 from app.services.article_summary import summarize_articles
 from app.services.chat_memory import (
+    clear_active_article,
     get_active_article,
     get_conversation_turns,
     get_or_create_session,
-    is_followup_question,
+    should_answer_about_active_article,
     update_session_memory,
 )
 from app.services.user_modes import parse_mode_filter
@@ -430,16 +431,34 @@ async def simple_chat(
     category_filter: str | None = None,
     timeline_filter: str | None = None,
     session_id: uuid.UUID | None = None,
+    article_id: uuid.UUID | None = None,
+    clear_article_context: bool = False,
 ) -> dict:
     session = await get_or_create_session(db, user_id, session_id)
 
-    if is_followup_question(question, session):
-        followup = await _answer_followup(db, user_id, question, session)
+    if clear_article_context:
+        await clear_active_article(db, session)
+        return {
+            "headline": "",
+            "brief_summary": "",
+            "why_it_matters": "",
+            "items": [],
+            "sources": [],
+            "related_news": [],
+            "session_id": str(session.id),
+            "active_article": None,
+        }
+
+    if should_answer_about_active_article(question, session, pinned_article_id=article_id):
+        followup = await _answer_about_article(
+            db, user_id, question, session, pinned_article_id=article_id,
+        )
         if followup:
             await update_session_memory(
                 db, session, question, followup, active_article=followup.get("_active_article"),
             )
             followup["session_id"] = str(session.id)
+            followup["active_article"] = followup.get("_active_article")
             followup.pop("_active_article", None)
             return followup
 
@@ -513,36 +532,62 @@ async def simple_chat(
             "newsletter": items[0].get("newsletter"),
         }
     result["session_id"] = str(session.id)
+    if active_article:
+        result["active_article"] = active_article
     await update_session_memory(db, session, question, result, active_article=active_article)
     return result
 
 
-async def _answer_followup(
+async def _answer_about_article(
     db: AsyncSession,
     user_id: uuid.UUID,
     question: str,
     session,
+    *,
+    pinned_article_id: uuid.UUID | None = None,
 ) -> dict | None:
-    active = get_active_article(session)
-    if not active or not active.get("article_id"):
-        return None
-    try:
-        article_id = uuid.UUID(active["article_id"])
-    except ValueError:
-        return None
+    if pinned_article_id:
+        article_id = pinned_article_id
+        newsletter_name = "Newsletter"
+        active_meta = get_active_article(session) or {}
+    else:
+        active = get_active_article(session)
+        if not active or not active.get("article_id"):
+            return None
+        try:
+            article_id = uuid.UUID(active["article_id"])
+        except ValueError:
+            return None
+        newsletter_name = active.get("newsletter") or "Newsletter"
+        active_meta = active
 
     article = await db.get(Article, article_id)
     if not article or article.user_id != user_id:
         return None
 
-    newsletter_name = active.get("newsletter") or "Newsletter"
-    answer = await answer_article_question(
-        article,
-        newsletter_name,
-        question,
-        get_conversation_turns(session),
-    )
-    url = _article_link(article) or active.get("url")
+    if pinned_article_id:
+        nl_row = await db.get(Newsletter, article.newsletter_id)
+        if nl_row:
+            newsletter_name = nl_row.name
+
+    q_lower = question.strip().lower()
+    wants_deep_dive = bool(re.search(
+        r"\b(detail|elaborate|explain|tell me more|deep dive|full account|in depth)\b",
+        q_lower,
+    ))
+
+    if wants_deep_dive:
+        summaries = await summarize_articles([article], depths=["elaborate"])
+        answer = summaries[0]
+    else:
+        answer = await answer_article_question(
+            article,
+            newsletter_name,
+            question,
+            get_conversation_turns(session),
+        )
+
+    url = _article_link(article) or active_meta.get("url")
     item = {
         "article_id": str(article.id),
         "title": article.title,
@@ -560,13 +605,22 @@ async def _answer_followup(
     }
     return {
         "headline": f"About — {article.title[:80]}",
-        "brief_summary": f"Follow-up on \"{article.title[:60]}\" from {newsletter_name}.",
+        "brief_summary": f"Answering about \"{article.title[:60]}\" from {newsletter_name}.",
         "why_it_matters": "",
         "items": [item],
         "sources": [{"newsletter": newsletter_name, "url": url}],
         "related_news": [],
         "_active_article": active_article,
     }
+
+
+async def _answer_followup(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    question: str,
+    session,
+) -> dict | None:
+    return await _answer_about_article(db, user_id, question, session)
 
 
 async def _fetch_articles(

@@ -406,7 +406,14 @@ async def chat_endpoint(
     try:
         if settings.simple_mode:
             result = await simple_chat(
-                db, user.id, body.question, body.category, body.timeline
+                db,
+                user.id,
+                body.question,
+                body.category,
+                body.timeline,
+                body.session_id,
+                body.article_id,
+                body.clear_article_context,
             )
         else:
             result = await chat(
@@ -431,6 +438,7 @@ async def chat_endpoint(
         is_breaking=result.get("is_breaking"),
         is_trending=result.get("is_trending"),
         session_id=result.get("session_id"),
+        active_article=result.get("active_article"),
         timeline_synthesis=result.get("timeline_synthesis"),
         evolution_summary=result.get("evolution_summary"),
         explanation=result.get("explanation"),
