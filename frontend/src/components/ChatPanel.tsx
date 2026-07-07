@@ -245,50 +245,55 @@ function ChatResponseCard({ response }: { response: ChatResponse }) {
 
   return (
     <div className="space-y-5 text-sm">
-      <h3 className="font-serif text-xl text-stone-900">{response.headline}</h3>
-      <p className="whitespace-pre-line leading-relaxed text-stone-700">
-        {response.brief_summary}
-      </p>
+      <div>
+        <h3 className="font-serif text-xl text-stone-900">{response.headline}</h3>
+        {response.brief_summary && (
+          <p className="mt-2 leading-relaxed text-stone-600">{response.brief_summary}</p>
+        )}
+      </div>
 
       {items.length > 0 && (
-        <div>
-          <p className="mb-3 text-xs font-medium tracking-wide text-stone-400 uppercase">
-            {items.length} stories with links
-          </p>
-          <ul className="space-y-5">
-            {items.map((item, i) => (
-              <li
-                key={i}
-                className="rounded-md border border-[var(--border)] bg-white p-5"
-              >
-                <p className="text-base font-medium text-stone-900">{item.title}</p>
-                <p className="mt-2 leading-relaxed text-stone-600">{item.summary}</p>
-                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-400">
-                  <span>{item.newsletter}</span>
+        <ul className="space-y-6">
+          {items.map((item, i) => (
+            <li
+              key={i}
+              className="rounded-md border border-[var(--border)] bg-white p-5"
+            >
+              <p className="text-base font-medium text-stone-900">{item.title}</p>
+              <p className="mt-3 leading-relaxed whitespace-pre-line text-stone-700">
+                {item.summary}
+              </p>
+              {item.url ? (
+                <p className="mt-4 text-sm text-stone-600">
+                  Read full article here:{" "}
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-medium text-[var(--accent)] hover:underline"
+                  >
+                    open link
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </p>
+              ) : (
+                <p className="mt-4 text-xs text-stone-400">
+                  Source: {item.newsletter}
                   {item.published_at && (
-                    <span>
+                    <>
+                      {" "}
+                      ·{" "}
                       {new Date(item.published_at).toLocaleDateString(undefined, {
                         month: "short",
                         day: "numeric",
                       })}
-                    </span>
+                    </>
                   )}
-                  {item.url && (
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 font-medium text-[var(--accent)] hover:underline"
-                    >
-                      Read article
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

@@ -10,13 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import CATEGORIES, CATEGORY_KEYWORDS, TIMELINE_FILTERS, TIMELINE_LABELS
 from app.models.article import Article
 from app.models.newsletter import Newsletter
+from app.services.article_summary import summarize_articles
 from app.services.user_modes import parse_mode_filter
 
 MAX_DIGEST_ITEMS = 20
 MAX_SEARCH_ITEMS = 8
 MAX_ELABORATE_ITEMS = 3
-SUMMARY_MAX_CHARS = 650
-ELABORATE_MAX_CHARS = 1200
 MIN_RELEVANCE_SCORE = 0.22
 
 _STOPWORDS = frozenset({
@@ -167,23 +166,6 @@ def _is_junk(article: Article) -> bool:
     return bool(_JUNK_PATTERNS.search(f"{article.title} {article.content_text or ''}"))
 
 
-def _article_summary(article: Article, long: bool = False) -> str:
-    limit = ELABORATE_MAX_CHARS if long else SUMMARY_MAX_CHARS
-    if article.short_summary and len(article.short_summary.strip()) > 80:
-        text = article.short_summary.strip()
-        return text[:limit] + ("…" if len(text) > limit else "")
-
-    text = re.sub(r"\s+", " ", (article.content_text or "").strip())
-    if not text:
-        return "No summary available."
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    count = 8 if long else 5
-    summary = " ".join(sentences[:count]).strip()
-    if len(summary) < 80:
-        summary = text[:limit]
-    return summary[:limit] + ("…" if len(text) > limit else "")
-
-
 def _article_link(article: Article) -> str | None:
     return article.url or article.official_link or article.newsletter_link
 
@@ -331,30 +313,13 @@ def _build_response(
 
     if intent == "elaborate":
         headline = f"Deep dive — {items[0]['title'][:80]}"
-        lines = [f"Here's a detailed look at the story you asked about ({period}):\n"]
-        item = items[0]
-        lines.append(item["title"])
-        lines.append(item["summary"])
-        if item.get("url"):
-            lines.append(f"Read more: {item['url']}")
-        elif item.get("newsletter"):
-            lines.append(f"Source: {item['newsletter']}")
-        brief = "\n".join(lines).strip()
+        brief = f"Here's a detailed look at the story you asked about ({period})."
     elif intent == "search":
         headline = f"Results for: {question[:80]}"
-        lines = [f"Found {len(items)} stor{'y' if len(items) == 1 else 'ies'} ({period}):\n"]
-        for i, item in enumerate(items, 1):
-            lines.append(f"{i}. {item['title']} — {item['summary'][:200]}…" if len(item["summary"]) > 200 else f"{i}. {item['title']} — {item['summary']}")
-        brief = "\n".join(lines)
+        brief = f"Found {len(items)} stor{'y' if len(items) == 1 else 'ies'} from {period}."
     else:
         headline = f"{mode_label} — {period}"
-        lines = [f"{mode_label} digest ({period}) — {len(items)} stories:\n"]
-        for i, item in enumerate(items, 1):
-            lines.append(f"{i}. {item['title']}")
-            lines.append(f"   {item['summary'][:300]}{'…' if len(item['summary']) > 300 else ''}")
-            lines.append(f"   Source: {item['newsletter']}")
-            lines.append("")
-        brief = "\n".join(lines).strip()
+        brief = f"{len(items)} stories from your {mode_label} newsletters ({period})."
 
     return {
         "headline": headline,
@@ -511,11 +476,18 @@ async def _fetch_articles(
     if not top and intent == "digest" and (static_mode or theme_keywords):
         top = ranked[:max_items]
 
+    article_rows = [(article, newsletter_name) for article, newsletter_name, _ in top]
+    long_flags = [long_summary] * len(article_rows)
+    summaries = await summarize_articles(
+        [a for a, _ in article_rows],
+        long_flags=long_flags,
+    )
+
     items = []
-    for article, newsletter_name, _ in top:
+    for (article, newsletter_name), summary in zip(article_rows, summaries):
         items.append({
             "title": article.title,
-            "summary": _article_summary(article, long=long_summary),
+            "summary": summary,
             "url": _article_link(article),
             "newsletter": newsletter_name,
             "published_at": (article.received_at or article.published_at).isoformat()
