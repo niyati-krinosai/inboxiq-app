@@ -5,6 +5,7 @@ import pytest
 from app.services.simple_chat import (
     _classify_intent,
     _extract_focus_query,
+    _extract_story_subject,
     _query_tokens,
     _score_article,
 )
@@ -53,3 +54,29 @@ def test_specific_query_high_score():
     q = "tell me about OpenAI GPT"
     score = _score_article(article, q, _query_tokens(q), None, [], "search")
     assert score > 0.3
+
+
+def test_pasted_headline_extraction():
+    q = "12. TESLA CAPS EMPLOYEE AI SPENDING AT $200/WEEK EXCEPT FOR GROK tell me more about this news"
+    subject = _extract_story_subject(q)
+    assert "tesla" in subject.lower()
+    assert "grok" in subject.lower()
+    assert "tell me more" not in subject.lower()
+
+
+def test_tesla_story_scores_above_unrelated():
+    tesla = Article(
+        title="TESLA CAPS EMPLOYEE AI SPENDING AT $200/WEEK EXCEPT FOR GROK",
+        content_text="Tesla limited internal AI tool spending to $200 per week except for Grok.",
+    )
+    other = Article(
+        title="CLOUDED JUDGEMENT - THE END OF COMPUTE SCARCITY?",
+        content_text="Meta and SpaceX selling compute capacity could mean excess supply.",
+    )
+    q = "12. TESLA CAPS EMPLOYEE AI SPENDING AT $200/WEEK EXCEPT FOR GROK tell me more about this news"
+    focus = _extract_focus_query(q)
+    tokens = _query_tokens(focus)
+    tesla_score = _score_article(tesla, focus, tokens, "AI Startups", [], "elaborate")
+    other_score = _score_article(other, focus, tokens, "AI Startups", [], "elaborate")
+    assert tesla_score > other_score
+    assert tesla_score >= 0.45

@@ -82,7 +82,24 @@ def _query_tokens(question: str) -> set[str]:
     return tokens
 
 
+def _extract_story_subject(question: str) -> str:
+    """Pull the story headline/topic from pasted newsletter text + ask phrasing."""
+    q = question.strip()
+    q = re.sub(r"^\d+\.\s*", "", q)
+    for pat in (
+        r"\b(tell me more about (this|the) (news|story|article).*)$",
+        r"\b(elaborate on (this|the) (news|story).*)$",
+        r"\b(more about (this|the) (news|story).*)$",
+        r"\b(tell me more|elaborate|explain more)\s*$",
+    ):
+        q = re.sub(pat, "", q, flags=re.IGNORECASE).strip()
+    return q
+
+
 def _extract_focus_query(question: str) -> str:
+    subject = _extract_story_subject(question)
+    if subject and subject != question.strip():
+        return subject
     for pat in (
         r"(?:elaborate|expand|explain|details?)\s+(?:on|about)\s+(.+)",
         r"(?:tell me )?more about\s+(.+)",
@@ -91,8 +108,10 @@ def _extract_focus_query(question: str) -> str:
     ):
         m = re.search(pat, question, re.IGNORECASE)
         if m:
-            return m.group(1).strip()
-    return question
+            focus = m.group(1).strip()
+            if focus.lower() not in ("this news", "the news", "this story", "the story"):
+                return focus
+    return _extract_story_subject(question) or question
 
 
 def _infer_timeline(question: str, timeline_filter: str | None) -> str:
@@ -169,6 +188,16 @@ def _article_link(article: Article) -> str | None:
     return article.url or article.official_link or article.newsletter_link
 
 
+def _title_match_ratio(title: str, q_tokens: set[str]) -> float:
+    if not q_tokens or not title:
+        return 0.0
+    title_tokens = set(re.findall(r"[a-z0-9]{3,}", title.lower()))
+    if not title_tokens:
+        return 0.0
+    hits = sum(1 for t in q_tokens if t in title_tokens or t in title.lower())
+    return hits / len(q_tokens)
+
+
 def _score_article(
     article: Article,
     question: str,
@@ -185,19 +214,24 @@ def _score_article(
     else:
         overlap = sum(1 for t in q_tokens if t in blob) / len(q_tokens)
         title_hits = sum(1 for t in q_tokens if t in title_blob)
-        overlap += title_hits * 0.15
+        overlap += title_hits * 0.2
+
+    title_ratio = _title_match_ratio(article.title or "", q_tokens)
+    title_boost = title_ratio * (0.8 if intent == "elaborate" else 0.35)
 
     mode_boost = 0.0
     if static_mode and _topic_matches(article, [static_mode], []):
-        mode_boost += 0.2 if intent != "digest" else 0.35
+        weight = 0.08 if intent == "elaborate" else (0.2 if intent != "digest" else 0.35)
+        mode_boost += weight
     if theme_keywords and _topic_matches(article, [], theme_keywords):
-        mode_boost += 0.3
+        weight = 0.1 if intent == "elaborate" else 0.3
+        mode_boost += weight
 
     recency = 0.0
     ts = article.received_at or article.published_at
     if ts:
         age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
-        recency = max(0, 1 - age_h / (24 * 7)) * 0.15
+        recency = max(0, 1 - age_h / (24 * 7)) * (0.05 if intent == "elaborate" else 0.15)
 
     link_boost = 0.1 if _article_link(article) else 0.0
     junk_penalty = -3.0 if _is_junk(article) else 0.0
@@ -205,7 +239,7 @@ def _score_article(
     if intent == "elaborate":
         overlap *= 1.5
 
-    return overlap * 0.65 + mode_boost + recency + link_boost + junk_penalty
+    return overlap * 0.55 + title_boost + mode_boost + recency + link_boost + junk_penalty
 
 
 def _period_label(timeline: str) -> str:
@@ -276,13 +310,14 @@ def _build_response(
 
     if intent == "elaborate":
         headline = f"Deep dive — {items[0]['title'][:80]}"
-        lines = [f"Here's a detailed look based on your question ({period}):\n"]
-        for i, item in enumerate(items, 1):
-            lines.append(f"{i}. {item['title']}")
-            lines.append(item["summary"])
-            if item.get("url"):
-                lines.append(f"Read more: {item['newsletter']}")
-            lines.append("")
+        lines = [f"Here's a detailed look at the story you asked about ({period}):\n"]
+        item = items[0]
+        lines.append(item["title"])
+        lines.append(item["summary"])
+        if item.get("url"):
+            lines.append(f"Read more: {item['url']}")
+        elif item.get("newsletter"):
+            lines.append(f"Source: {item['newsletter']}")
         brief = "\n".join(lines).strip()
     elif intent == "search":
         headline = f"Results for: {question[:80]}"
@@ -433,8 +468,8 @@ async def _fetch_articles(
     ]
 
     if intent == "elaborate":
-        max_items = MAX_ELABORATE_ITEMS
-        min_score = 0.12
+        max_items = 1
+        min_score = 0.45 if len(q_tokens) >= 4 else 0.3
         long_summary = True
     elif intent == "digest":
         max_items = MAX_DIGEST_ITEMS
