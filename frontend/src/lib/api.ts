@@ -197,6 +197,8 @@ export interface ChatResponse {
 
   items?: ChatArticleItem[];
 
+  session_id?: string | null;
+
 }
 
 
@@ -268,13 +270,18 @@ export const api = {
 
   },
 
-  chat: (question: string, category?: string, timeline?: string) =>
+  chat: (question: string, category?: string, timeline?: string, sessionId?: string) =>
 
     apiFetch<ChatResponse>("/chat", {
 
       method: "POST",
 
-      body: JSON.stringify({ question, category, timeline }),
+      body: JSON.stringify({
+        question,
+        category,
+        timeline,
+        session_id: sessionId ?? null,
+      }),
 
     }),
 

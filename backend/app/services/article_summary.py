@@ -13,10 +13,11 @@ log = get_logger(__name__)
 client = create_openai_client()
 
 DIGEST_SENTENCES = 6
-ELABORATE_SENTENCES = 10
+ELABORATE_SENTENCES = 24
 DIGEST_MAX_CHARS = 900
-ELABORATE_MAX_CHARS = 1400
-LLM_BATCH_SIZE = 8
+ELABORATE_MAX_CHARS = 4500
+LLM_BATCH_SIZE = 6
+ELABORATE_MAX_TOKENS = 1600
 
 _JUNK_LINE = re.compile(
     r"(unsubscribe|view in browser|read online|sponsor|advertisement|"
@@ -159,46 +160,69 @@ def heuristic_article_summary(article: Article, *, long: bool = False) -> str:
     return summary[:limit] + ("…" if len(cleaned) > limit else "")
 
 
-async def summarize_articles(articles: list[Article], *, long_flags: list[bool]) -> list[str]:
+async def summarize_articles(
+    articles: list[Article],
+    *,
+    long_flags: list[bool] | None = None,
+    depths: list[str] | None = None,
+) -> list[str]:
     if not articles:
         return []
-    if len(long_flags) != len(articles):
-        long_flags = [False] * len(articles)
+    if depths is None:
+        depths = ["elaborate" if flag else "digest" for flag in (long_flags or [False] * len(articles))]
+    if len(depths) != len(articles):
+        depths = ["digest"] * len(articles)
 
     if client and settings.openai_api_key:
         try:
-            return await _summarize_with_llm(articles, long_flags)
+            return await _summarize_with_llm(articles, depths)
         except Exception as exc:
             log.warning("article_summary_llm_failed", error=str(exc))
 
-    return [heuristic_article_summary(a, long=flag) for a, flag in zip(articles, long_flags)]
+    return [
+        heuristic_article_summary(a, long=(depth == "elaborate"))
+        for a, depth in zip(articles, depths)
+    ]
 
 
-async def _summarize_with_llm(articles: list[Article], long_flags: list[bool]) -> list[str]:
+async def _summarize_with_llm(articles: list[Article], depths: list[str]) -> list[str]:
     summaries: list[str | None] = [None] * len(articles)
 
     for start in range(0, len(articles), LLM_BATCH_SIZE):
         batch_articles = articles[start : start + LLM_BATCH_SIZE]
-        batch_flags = long_flags[start : start + LLM_BATCH_SIZE]
-        batch_summaries = await _llm_batch(batch_articles, batch_flags)
+        batch_depths = depths[start : start + LLM_BATCH_SIZE]
+        batch_summaries = await _llm_batch(batch_articles, batch_depths)
         for offset, summary in enumerate(batch_summaries):
             summaries[start + offset] = summary
 
     return [
-        s if s else heuristic_article_summary(a, long=flag)
-        for s, a, flag in zip(summaries, articles, long_flags)
+        s if s else heuristic_article_summary(a, long=(depth == "elaborate"))
+        for s, a, depth in zip(summaries, articles, depths)
     ]
 
 
-async def _llm_batch(articles: list[Article], long_flags: list[bool]) -> list[str]:
+def _article_metadata(article: Article) -> dict:
+    return {
+        "companies": article.companies or [],
+        "products": article.products or [],
+        "why_it_matters": article.why_it_matters,
+        "business_impact": article.business_impact,
+        "technical_impact": article.technical_impact,
+        "developer_takeaway": article.developer_takeaway,
+        "categories": article.categories or [],
+    }
+
+
+async def _llm_batch(articles: list[Article], depths: list[str]) -> list[str]:
     stories = []
-    for i, (article, long) in enumerate(zip(articles, long_flags)):
+    for i, (article, depth) in enumerate(zip(articles, depths)):
         content = _clean_content(_strip_title_prefix(article.content_text or "", article.title or ""))
         stories.append({
             "id": i,
             "title": article.title,
-            "content": content[:2500],
-            "sentence_count": ELABORATE_SENTENCES if long else DIGEST_SENTENCES,
+            "content": content[:6500],
+            "depth": depth,
+            "metadata": _article_metadata(article),
         })
 
     response = await client.chat.completions.create(
@@ -207,10 +231,13 @@ async def _llm_batch(articles: list[Article], long_flags: list[bool]) -> list[st
             {
                 "role": "system",
                 "content": (
-                    "You summarize newsletter news stories for a reading app. "
+                    "You summarize newsletter news stories for a personal reading app. "
                     "Return only valid JSON: {\"summaries\": [{\"id\": 0, \"summary\": \"...\"}]}. "
-                    "Each summary must be clear informative prose (no bullets, no markdown). "
-                    "Explain what happened, who is involved, and why it matters."
+                    "For depth=digest: 4-6 sentences, concise overview. "
+                    "For depth=elaborate: write a thorough personalized deep-dive in 4-8 paragraphs. "
+                    "Cover what happened, background, key players, technical and business implications, "
+                    "limitations, and why it matters to someone following this space. "
+                    "Use specific facts from the article. No bullet points or markdown."
                 ),
             },
             {
@@ -218,7 +245,8 @@ async def _llm_batch(articles: list[Article], long_flags: list[bool]) -> list[st
                 "content": json.dumps({"stories": stories}, ensure_ascii=False),
             },
         ],
-        temperature=0.3,
+        temperature=0.35,
+        max_tokens=ELABORATE_MAX_TOKENS,
         response_format={"type": "json_object"},
     )
     raw = response.choices[0].message.content or "{}"

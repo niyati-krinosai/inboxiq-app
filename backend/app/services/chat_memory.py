@@ -1,5 +1,6 @@
 """Phase 18: Knowledge memory across chat turns."""
 
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -7,6 +8,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.intelligence import ChatSession
+
+_NEW_TOPIC_PATTERNS = re.compile(
+    r"\b(summarize|summary|digest|recap|roundup|everything|all stories|catch me up)\b",
+    re.IGNORECASE,
+)
+
+_FOLLOWUP_PATTERNS = re.compile(
+    r"\b("
+    r"it|this|that|they|them|those|the story|this story|that story|the article|"
+    r"the newsletter|the mcp|the api|about (it|this|that)|what about|how does|"
+    r"why does|does it|can it|is it|are they|will it|would it"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 async def get_or_create_session(
@@ -33,6 +48,49 @@ async def get_or_create_session(
     return session
 
 
+def get_active_article(session: ChatSession | None) -> dict | None:
+    if not session or not session.messages:
+        return None
+    for msg in reversed(session.messages):
+        if msg.get("role") == "assistant" and msg.get("active_article"):
+            return msg["active_article"]
+    return None
+
+
+def get_conversation_turns(session: ChatSession | None) -> list[dict]:
+    if not session or not session.messages:
+        return []
+    turns = []
+    for msg in session.messages:
+        role = msg.get("role")
+        content = msg.get("content") or msg.get("headline")
+        if role in ("user", "assistant") and content:
+            turns.append({"role": role, "content": str(content)})
+    return turns
+
+
+def is_followup_question(question: str, session: ChatSession | None) -> bool:
+    if not get_active_article(session):
+        return False
+    q = question.strip()
+    if len(q) < 3:
+        return False
+    if _NEW_TOPIC_PATTERNS.search(q):
+        return False
+    if len(q) >= 80 and re.search(r"\b(tell me|elaborate|detailed news)\b", q, re.I):
+        return False
+    lower = q.lower()
+    words = lower.split()
+    if _FOLLOWUP_PATTERNS.search(lower):
+        return True
+    if len(words) <= 20 and re.match(
+        r"^(what|why|how|when|where|who|does|do|is|are|can|will|would|could|explain)\b",
+        lower,
+    ):
+        return True
+    return len(words) <= 8
+
+
 async def update_session_memory(
     db: AsyncSession,
     session: ChatSession,
@@ -40,6 +98,7 @@ async def update_session_memory(
     response: dict,
     retrieved_topics: list[str] | None = None,
     retrieved_entities: list[str] | None = None,
+    active_article: dict | None = None,
 ) -> None:
     topics = list(session.context_topics or [])
     entities = list(session.context_entities or [])
@@ -52,7 +111,6 @@ async def update_session_memory(
         if e not in entities:
             entities.append(e)
 
-    # Extract entities from question (simple keyword pass)
     for word in question.split():
         if len(word) > 3 and word[0].isupper():
             if word not in entities:
@@ -66,6 +124,8 @@ async def update_session_memory(
     messages.append({
         "role": "assistant",
         "headline": response.get("headline"),
+        "content": _assistant_content(response),
+        "active_article": active_article,
         "at": datetime.now(timezone.utc).isoformat(),
     })
 
@@ -91,3 +151,10 @@ def build_memory_context(session: ChatSession | None) -> str:
             content = m.get("content") or m.get("headline", "")
             parts.append(f"  {role}: {content[:200]}")
     return "\n".join(parts)
+
+
+def _assistant_content(response: dict) -> str:
+    items = response.get("items") or []
+    if len(items) == 1 and items[0].get("summary"):
+        return str(items[0]["summary"])
+    return str(response.get("brief_summary") or response.get("headline") or "")

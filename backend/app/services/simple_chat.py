@@ -10,7 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import CATEGORIES, CATEGORY_KEYWORDS, TIMELINE_FILTERS, TIMELINE_LABELS
 from app.models.article import Article
 from app.models.newsletter import Newsletter
+from app.services.article_qa import answer_article_question
 from app.services.article_summary import summarize_articles
+from app.services.chat_memory import (
+    get_active_article,
+    get_conversation_turns,
+    get_or_create_session,
+    is_followup_question,
+    update_session_memory,
+)
 from app.services.user_modes import parse_mode_filter
 
 MAX_DIGEST_ITEMS = 20
@@ -421,10 +429,26 @@ async def simple_chat(
     question: str,
     category_filter: str | None = None,
     timeline_filter: str | None = None,
+    session_id: uuid.UUID | None = None,
 ) -> dict:
+    session = await get_or_create_session(db, user_id, session_id)
+
+    if is_followup_question(question, session):
+        followup = await _answer_followup(db, user_id, question, session)
+        if followup:
+            await update_session_memory(
+                db, session, question, followup, active_article=followup.get("_active_article"),
+            )
+            followup["session_id"] = str(session.id)
+            followup.pop("_active_article", None)
+            return followup
+
     intent = _classify_intent(question)
     if intent in ("greeting", "help", "vague"):
-        return {**_conversational_response(intent, question), "why_it_matters": ""}
+        result = {**_conversational_response(intent, question), "why_it_matters": ""}
+        result["session_id"] = str(session.id)
+        await update_session_memory(db, session, question, result, active_article=None)
+        return result
 
     timeline = _infer_timeline(question, timeline_filter)
     if timeline not in TIMELINE_FILTERS:
@@ -479,7 +503,70 @@ async def simple_chat(
         soft_theme=theme_keywords if not strict_mode else [],
     )
 
-    return _build_response(intent, question, items, mode_label, period)
+    result = _build_response(intent, question, items, mode_label, period)
+    active_article = None
+    if len(items) == 1 and items[0].get("article_id"):
+        active_article = {
+            "article_id": items[0]["article_id"],
+            "title": items[0]["title"],
+            "url": items[0].get("url"),
+            "newsletter": items[0].get("newsletter"),
+        }
+    result["session_id"] = str(session.id)
+    await update_session_memory(db, session, question, result, active_article=active_article)
+    return result
+
+
+async def _answer_followup(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    question: str,
+    session,
+) -> dict | None:
+    active = get_active_article(session)
+    if not active or not active.get("article_id"):
+        return None
+    try:
+        article_id = uuid.UUID(active["article_id"])
+    except ValueError:
+        return None
+
+    article = await db.get(Article, article_id)
+    if not article or article.user_id != user_id:
+        return None
+
+    newsletter_name = active.get("newsletter") or "Newsletter"
+    answer = await answer_article_question(
+        article,
+        newsletter_name,
+        question,
+        get_conversation_turns(session),
+    )
+    url = _article_link(article) or active.get("url")
+    item = {
+        "article_id": str(article.id),
+        "title": article.title,
+        "summary": answer,
+        "url": url,
+        "newsletter": newsletter_name,
+        "published_at": (article.received_at or article.published_at).isoformat()
+        if (article.received_at or article.published_at) else None,
+    }
+    active_article = {
+        "article_id": str(article.id),
+        "title": article.title,
+        "url": url,
+        "newsletter": newsletter_name,
+    }
+    return {
+        "headline": f"About — {article.title[:80]}",
+        "brief_summary": f"Follow-up on \"{article.title[:60]}\" from {newsletter_name}.",
+        "why_it_matters": "",
+        "items": [item],
+        "sources": [{"newsletter": newsletter_name, "url": url}],
+        "related_news": [],
+        "_active_article": active_article,
+    }
 
 
 async def _fetch_articles(
@@ -570,15 +657,16 @@ async def _fetch_articles(
         top = ranked[:max_items]
 
     article_rows = [(article, newsletter_name) for article, newsletter_name, _ in top]
-    long_flags = [long_summary] * len(article_rows)
+    depths = ["elaborate" if intent == "elaborate" else "digest"] * len(article_rows)
     summaries = await summarize_articles(
         [a for a, _ in article_rows],
-        long_flags=long_flags,
+        depths=depths,
     )
 
     items = []
     for (article, newsletter_name), summary in zip(article_rows, summaries):
         items.append({
+            "article_id": str(article.id),
             "title": article.title,
             "summary": summary,
             "url": _article_link(article),
