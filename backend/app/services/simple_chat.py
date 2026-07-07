@@ -47,6 +47,29 @@ _NEWSLETTER_ALIASES: dict[str, list[str]] = {
 }
 
 
+_GENERIC_NEWS_TOKENS = frozenset({
+    "model", "protocol", "launched", "introduced", "released", "announced",
+    "tools", "server", "capabilities", "applications", "features", "updates",
+    "integration", "integrations", "platform", "company", "product", "products",
+    "service", "services", "developer", "developers", "engineering", "research",
+})
+
+_DETAIL_ASK_SUFFIX = re.compile(
+    r"\b("
+    r"tell me (?:more |detailed |the )?(?:news|details?|story)(?:\s+on\s+this)?|"
+    r"give me (?:more )?details?(?:\s+on\s+this)?|"
+    r"(?:more |full )?details?(?:\s+on)?\s+(?:this|that)(?:\s+news|\s+story)?|"
+    r"detailed news on this|explain this|expand on this"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_pasted_story_detail_request(question: str) -> bool:
+    q = question.strip()
+    return len(q) >= 80 and bool(_DETAIL_ASK_SUFFIX.search(q))
+
+
 def _classify_intent(question: str) -> str:
     q = question.strip().lower()
     words = q.split()
@@ -56,9 +79,12 @@ def _classify_intent(question: str) -> str:
             return "greeting"
     if re.search(r"\b(help|how do i|how to use|what can you)\b", q):
         return "help"
+    if _is_pasted_story_detail_request(question):
+        return "elaborate"
     if re.search(
-        r"\b(elaborate|explain more|tell me more|expand on|more about|more detail|"
-        r"deep dive|details on|break down|walk me through)\b",
+        r"\b(elaborate|explain more|tell me more|tell me (?:the )?detail|tell me detailed|"
+        r"detailed news|more detail|more details|in detail|full details?|"
+        r"expand on|more about|deep dive|details on|break down|walk me through)\b",
         q,
     ):
         return "elaborate"
@@ -73,11 +99,13 @@ def _classify_intent(question: str) -> str:
     return "search"
 
 
-def _query_tokens(question: str) -> set[str]:
+def _query_tokens(question: str, *, distinctive_only: bool = False) -> set[str]:
     tokens = {
         t for t in re.findall(r"[a-z0-9]{3,}", question.lower())
         if t not in _STOPWORDS
     }
+    if distinctive_only:
+        tokens = {t for t in tokens if t not in _GENERIC_NEWS_TOKENS}
     return tokens
 
 
@@ -85,6 +113,7 @@ def _extract_story_subject(question: str) -> str:
     """Pull the story headline/topic from pasted newsletter text + ask phrasing."""
     q = question.strip()
     q = re.sub(r"^\d+\.\s*", "", q)
+    q = _DETAIL_ASK_SUFFIX.sub("", q).strip()
     for pat in (
         r"\b(tell me more about (this|the) (news|story|article).*)$",
         r"\b(elaborate on (this|the) (news|story).*)$",
@@ -93,6 +122,25 @@ def _extract_story_subject(question: str) -> str:
     ):
         q = re.sub(pat, "", q, flags=re.IGNORECASE).strip()
     return q
+
+
+def _extract_story_headline(subject: str) -> str:
+    """Short headline anchor from pasted newsletter text (avoids generic body-token matches)."""
+    if not subject:
+        return ""
+    s = subject.strip()
+    if len(s) <= 100:
+        return s
+    for pat in (
+        r"^(.+?,\s+which\b)",
+        r"^(.+?,\s+enabling\b)",
+        r"^(.+?,\s+allowing\b)",
+        r"^(.+?\.)",
+    ):
+        m = re.match(pat, s, re.IGNORECASE)
+        if m and len(m.group(1)) >= 20:
+            return m.group(1).rstrip(",").strip()
+    return " ".join(s.split()[:14])
 
 
 def _extract_focus_query(question: str) -> str:
@@ -180,12 +228,39 @@ def _title_match_ratio(title: str, q_tokens: set[str]) -> float:
     return hits / len(q_tokens)
 
 
+def _headline_sequence_boost(title: str, headline: str) -> float:
+    """Reward consecutive headline words appearing in the article title."""
+    if not title or not headline:
+        return 0.0
+    words = [
+        w for w in re.findall(r"[a-z0-9]+", headline.lower())
+        if len(w) >= 2 and w not in _STOPWORDS and w not in _GENERIC_NEWS_TOKENS
+    ]
+    if len(words) < 3:
+        return 0.0
+    title_norm = re.sub(r"[^a-z0-9]+", " ", title.lower())
+    best = 0
+    for i in range(len(words)):
+        for j in range(i + 3, min(i + 8, len(words)) + 1):
+            phrase = " ".join(words[i:j])
+            if phrase in title_norm:
+                best = max(best, j - i)
+    if best >= 4:
+        return 1.0
+    if best >= 3:
+        return 0.75
+    return 0.0
+
+
 def _title_phrase_boost(title: str, subject: str) -> float:
     """Strong match when the user pastes or names a specific headline (any story)."""
-    if not title or not subject or len(subject) < 12:
+    if not title or not subject:
+        return 0.0
+    headline = _extract_story_headline(subject) if len(subject) > 100 else subject
+    if len(headline) < 12:
         return 0.0
     norm = lambda s: re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
-    subj = norm(subject)
+    subj = norm(headline)
     tit = norm(title)
     if not subj or not tit:
         return 0.0
@@ -196,7 +271,7 @@ def _title_phrase_boost(title: str, subject: str) -> float:
         hits = sum(1 for w in subj_words if w in tit)
         if hits / len(subj_words) >= 0.6:
             return 0.85
-    return 0.0
+    return _headline_sequence_boost(title, headline)
 
 
 def _score_article(
@@ -219,8 +294,17 @@ def _score_article(
         overlap += title_hits * 0.2
 
     title_ratio = _title_match_ratio(article.title or "", q_tokens)
-    phrase_boost = _title_phrase_boost(article.title or "", story_subject or question)
-    title_boost = max(title_ratio * (0.8 if intent == "elaborate" else 0.35), phrase_boost)
+    phrase_subject = story_subject or question
+    phrase_boost = _title_phrase_boost(article.title or "", phrase_subject)
+    seq_boost = _headline_sequence_boost(
+        article.title or "",
+        _extract_story_headline(phrase_subject) if len(phrase_subject) > 80 else phrase_subject,
+    )
+    title_boost = max(
+        title_ratio * (0.8 if intent == "elaborate" else 0.35),
+        phrase_boost,
+        seq_boost * (1.0 if intent == "elaborate" else 0.5),
+    )
 
     mode_boost = 0.0
     if static_mode and _topic_matches(article, [static_mode], []):
@@ -352,8 +436,17 @@ async def simple_chat(
     nl_from_question = _infer_newsletter_from_question(question)
 
     story_subject = _extract_story_subject(question)
-    search_question = _extract_focus_query(question) if intent == "elaborate" else question
-    q_tokens = _query_tokens(search_question)
+    story_headline = _extract_story_headline(story_subject)
+
+    if intent == "elaborate":
+        search_question = _extract_focus_query(question)
+        token_source = story_headline or search_question
+        q_tokens = _query_tokens(token_source, distinctive_only=True) or _query_tokens(token_source)
+        if story_headline:
+            story_subject = story_headline
+    else:
+        search_question = question
+        q_tokens = _query_tokens(search_question)
 
     # Digest with a mode selected and vague question → use mode as primary filter
     topics_from_q = _infer_topics_from_question(question)

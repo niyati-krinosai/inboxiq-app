@@ -5,6 +5,7 @@ import pytest
 from app.services.simple_chat import (
     _classify_intent,
     _extract_focus_query,
+    _extract_story_headline,
     _extract_story_subject,
     _query_tokens,
     _score_article,
@@ -80,3 +81,41 @@ def test_tesla_story_scores_above_unrelated():
     other_score = _score_article(other, focus, tokens, "AI Startups", [], "elaborate")
     assert tesla_score > other_score
     assert tesla_score >= 0.45
+
+
+def test_detailed_news_on_pasted_story_is_elaborate():
+    q = (
+        "X has released a Model Context Protocol X has launched the Model Context Protocol (MCP), "
+        "which facilitates communication between AI tools and the X API. tell me detailed news on this"
+    )
+    assert _classify_intent(q) == "elaborate"
+
+
+def test_x_mcp_story_beats_other_mcp_articles():
+    q = (
+        "X has released a Model Context Protocol X has launched the Model Context Protocol (MCP), "
+        "which facilitates communication between AI tools and the X API. tell me detailed news on this"
+    )
+    subject = _extract_story_subject(q)
+    headline = _extract_story_headline(subject)
+    tokens = _query_tokens(headline, distinctive_only=True) or _query_tokens(headline)
+
+    x_story = Article(
+        title="X HAS RELEASED A MODEL CONTEXT PROTOCOL",
+        content_text="X launched an MCP server for the X API for AI tool integrations.",
+    )
+    safari = Article(
+        title="INTRODUCING THE SAFARI MCP SERVER FOR WEB DEVELOPERS",
+        content_text="Apple Safari MCP server for web developers and DOM inspection.",
+    )
+    claude = Article(
+        title="CLAUDE SONNET 5 HAS BEEN LAUNCHED",
+        content_text="Anthropic launched Claude Sonnet 5 with improved agentic capabilities.",
+    )
+
+    x_score = _score_article(x_story, headline, tokens, None, [], "elaborate", headline)
+    safari_score = _score_article(safari, headline, tokens, None, [], "elaborate", headline)
+    claude_score = _score_article(claude, headline, tokens, None, [], "elaborate", headline)
+    assert x_score > safari_score
+    assert x_score > claude_score
+    assert x_score >= 0.45
