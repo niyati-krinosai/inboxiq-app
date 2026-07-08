@@ -96,10 +96,13 @@ async def _collect_message_ids(service, queries: list[str], max_messages: int) -
 
 def _discovery_queries() -> list[str]:
     """Queries that surface newsletter subscriptions in Gmail."""
+    from_clause = GMAIL_NEWSLETTER_FROM_CLAUSES
     return [
-        f"list:({{list-unsubscribe}} OR unsubscribe) OR from:({GMAIL_NEWSLETTER_FROM_CLAUSES})",
-        f"from:({GMAIL_NEWSLETTER_FROM_CLAUSES}) newer_than:90d",
-        "from:(tldrnewsletter.com OR tldr.tech) newer_than:30d",
+        f"list:({{list-unsubscribe}} OR unsubscribe) OR from:({from_clause})",
+        f"from:({from_clause}) newer_than:2y",
+        "list:({list-unsubscribe} OR unsubscribe) newer_than:2y",
+        "from:(tldrnewsletter.com OR tldr.tech OR benedictevans.com OR therundown.ai) newer_than:1y",
+        "category:promotions newer_than:1y",
     ]
 
 

@@ -40,7 +40,7 @@ services:
       - key: USE_CELERY
         value: "false"
       - key: INITIAL_SYNC_MAX_MESSAGES
-        value: "400"
+        value: "5000"
       - key: OPENAI_API_KEY
         sync: false
       - key: ADMIN_SECRET
