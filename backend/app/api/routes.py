@@ -1,5 +1,6 @@
 import uuid
-from datetime import datetime, timezone
+import asyncio
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
@@ -66,14 +67,17 @@ async def _run_light_pipeline(user_id: uuid.UUID) -> None:
 _sync_inflight: set[str] = set()
 
 
-def _queue_gmail_sync(background_tasks: BackgroundTasks, user_id: uuid.UUID) -> None:
-    """Always run Gmail sync inline on Render (no Celery worker)."""
-    background_tasks.add_task(_run_gmail_sync, user_id)
+def _queue_gmail_sync(background_tasks: BackgroundTasks | None, user_id: uuid.UUID) -> None:
+    """Run Gmail sync on Render without Celery (BackgroundTasks are unreliable there)."""
     if settings.use_celery:
+        if background_tasks:
+            background_tasks.add_task(_run_gmail_sync, user_id)
         try:
             sync_user_gmail.delay(str(user_id))
         except Exception as exc:
             log.warning("celery_sync_unavailable", error=str(exc))
+    else:
+        asyncio.create_task(_run_gmail_sync(user_id))
 
 
 async def _run_gmail_sync(user_id: uuid.UUID) -> None:
@@ -290,12 +294,17 @@ async def sync_status(
         )
     )).scalar() or 0
 
-    # Recover stuck syncs (OAuth BackgroundTask killed on serverless, or Celery never ran)
-    if (
-        user.gmail_connected
+    # Recover stuck syncs (BackgroundTask killed, Celery never ran, or status stuck on "syncing")
+    stuck_syncing = (
+        user.sync_status == "syncing"
         and not user.initial_sync_complete
-        and user.sync_status != "syncing"
-    ):
+        and user.updated_at
+        and user.updated_at < datetime.now(timezone.utc) - timedelta(minutes=10)
+    )
+    if stuck_syncing:
+        user.sync_status = "idle"
+        await db.commit()
+    if user.gmail_connected and not user.initial_sync_complete and user.sync_status != "syncing":
         _queue_gmail_sync(background_tasks, user.id)
     elif user.gmail_connected and (pending > 0 or (article_count == 0 and issue_count > 0)):
         background_tasks.add_task(_run_light_pipeline, user.id)
@@ -319,6 +328,11 @@ async def trigger_sync(
 ):
     if not user.gmail_connected:
         raise HTTPException(status_code=400, detail="Gmail not connected")
+    if not settings.use_celery:
+        await _run_gmail_sync(user.id)
+        if settings.simple_mode:
+            await _run_light_pipeline(user.id)
+        return {"status": "sync_complete"}
     _queue_gmail_sync(background_tasks, user.id)
     if settings.simple_mode:
         background_tasks.add_task(_run_light_pipeline, user.id)

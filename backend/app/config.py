@@ -113,6 +113,9 @@ class Settings(BaseSettings):
     gmail_pubsub_topic: str = ""  # projects/PROJECT/topics/TOPIC
     gmail_webhook_secret: str = ""
 
+    # Support / admin (set on Render to list users and force-sync by email)
+    admin_secret: str = ""
+
     # Pipeline mode
     use_streaming_pipeline: bool = False  # event-driven per-stage workers when True
     simple_mode: bool = True  # lightweight: segment only, article-based chat (no LLM pipeline)
