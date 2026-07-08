@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api, User, SyncStatus, PersonalMode } from "@/lib/api";
 import { getToken, clearToken } from "@/lib/api";
@@ -21,6 +21,7 @@ export default function DashboardPage() {
   const [categories, setCategories] = useState<string[]>([]);
   const [personalModes, setPersonalModes] = useState<PersonalMode[]>([]);
   const [syncing, setSyncing] = useState(false);
+  const autoSyncStarted = useRef(false);
 
   useEffect(() => {
     if (!getToken()) {
@@ -34,7 +35,22 @@ export default function DashboardPage() {
         setSyncStatus(s);
         setCategories(c.categories);
         setPersonalModes(c.personal_modes ?? []);
-        if ((s.pending_processing ?? 0) > 0 || s.article_count === 0) {
+        if (
+          s.gmail_connected &&
+          !s.initial_sync_complete &&
+          !autoSyncStarted.current
+        ) {
+          autoSyncStarted.current = true;
+          setSyncing(true);
+          try {
+            await api.triggerSync();
+            await api.processNewsletters();
+          } catch {
+            /* status poll will recover */
+          } finally {
+            setSyncing(false);
+          }
+        } else if ((s.pending_processing ?? 0) > 0 || s.article_count === 0) {
           api.processNewsletters().catch(() => {});
         }
       })
@@ -90,9 +106,21 @@ export default function DashboardPage() {
             {syncStatus && (
               <>
                 {syncStatus.newsletter_count} newsletters · {syncStatus.article_count} articles
-                {!syncStatus.initial_sync_complete && (
+                {syncStatus.sync_status === "syncing" && (
                   <span className="ml-2 text-amber-700">
-                    · syncing
+                    · importing from Gmail
+                    <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />
+                  </span>
+                )}
+                {syncStatus.sync_status === "failed" && (
+                  <span className="ml-2 text-red-600">· sync failed — click Sync now</span>
+                )}
+                {!syncStatus.initial_sync_complete &&
+                  syncStatus.sync_status !== "syncing" &&
+                  syncStatus.sync_status !== "failed" &&
+                  syncStatus.gmail_connected && (
+                  <span className="ml-2 text-amber-700">
+                    · starting sync
                     <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />
                   </span>
                 )}

@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     # Pipeline mode
     use_streaming_pipeline: bool = False  # event-driven per-stage workers when True
     simple_mode: bool = True  # lightweight: segment only, article-based chat (no LLM pipeline)
+    use_celery: bool = False  # Render has no Redis worker — use inline BackgroundTasks
 
     def model_versions(self) -> dict:
         return {

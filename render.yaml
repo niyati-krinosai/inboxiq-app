@@ -37,5 +37,9 @@ services:
         value: https://inboxiq-iota.vercel.app
       - key: SIMPLE_MODE
         value: "true"
+      - key: USE_CELERY
+        value: "false"
+      - key: INITIAL_SYNC_MAX_MESSAGES
+        value: "400"
       - key: OPENAI_API_KEY
         sync: false

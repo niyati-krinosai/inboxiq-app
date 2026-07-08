@@ -63,24 +63,60 @@ async def _run_light_pipeline(user_id: uuid.UUID) -> None:
             log.error("light_pipeline_failed", user_id=str(user_id), error=str(exc))
 
 
+_sync_inflight: set[str] = set()
+
+
+def _queue_gmail_sync(background_tasks: BackgroundTasks, user_id: uuid.UUID) -> None:
+    """Always run Gmail sync inline on Render (no Celery worker)."""
+    background_tasks.add_task(_run_gmail_sync, user_id)
+    if settings.use_celery:
+        try:
+            sync_user_gmail.delay(str(user_id))
+        except Exception as exc:
+            log.warning("celery_sync_unavailable", error=str(exc))
+
+
 async def _run_gmail_sync(user_id: uuid.UUID) -> None:
     """Fallback when Celery is not running."""
+    key = str(user_id)
+    if key in _sync_inflight:
+        log.info("gmail_sync_skipped_inflight", user_id=key)
+        return
+    _sync_inflight.add(key)
     async with AsyncSessionLocal() as db:
         try:
             result = await db.execute(select(User).where(User.id == user_id))
             user = result.scalar_one_or_none()
             if not user or not user.gmail_connected:
                 return
+            user.sync_status = "syncing"
+            await db.commit()
+
+            result = await db.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                return
+
             if not user.initial_sync_complete:
                 await initial_sync(db, user)
             else:
                 await incremental_sync(db, user)
             await db.commit()
-            log.info("inline_gmail_sync_done", user_id=str(user_id))
+            log.info("inline_gmail_sync_done", user_id=key)
             await _run_light_pipeline(user_id)
         except Exception as exc:
             await db.rollback()
-            log.error("inline_gmail_sync_failed", user_id=str(user_id), error=str(exc))
+            try:
+                result = await db.execute(select(User).where(User.id == user_id))
+                user = result.scalar_one_or_none()
+                if user:
+                    user.sync_status = "failed"
+                    await db.commit()
+            except Exception:
+                await db.rollback()
+            log.error("inline_gmail_sync_failed", user_id=key, error=str(exc))
+        finally:
+            _sync_inflight.discard(key)
 
 
 def _event_to_response(event) -> dict:
@@ -164,18 +200,10 @@ async def auth_callback(
         token = create_access_token(user.id, user.email)
         log.info("oauth_stage_done", stage=stage)
 
-        # Queue initial Gmail sync (do not fail login if Celery unavailable)
+        # Queue initial Gmail sync (inline on Render — Celery optional)
         stage = "queue_sync"
-        celery_ok = False
-        try:
-            sync_user_gmail.delay(str(user.id))
-            celery_ok = True
-            log.info("oauth_stage_done", stage=stage)
-        except Exception as e:
-            log.warning("oauth_queue_failed", stage=stage, reason=str(e))
-
-        if not celery_ok:
-            background_tasks.add_task(_run_gmail_sync, user.id)
+        _queue_gmail_sync(background_tasks, user.id)
+        log.info("oauth_stage_done", stage=stage, user_id=str(user.id))
 
         # Optionally register Pub/Sub watch (best effort)
         if settings.gmail_pubsub_topic:
@@ -244,7 +272,11 @@ async def delete_account(user: User = Depends(get_current_user), db: AsyncSessio
 # ── Sync status ───────────────────────────────────────────────────────────────
 
 @router.get("/sync/status", response_model=SyncStatusResponse)
-async def sync_status(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def sync_status(
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     nl_count = (await db.execute(select(func.count()).where(Newsletter.user_id == user.id))).scalar() or 0
     issue_count = (await db.execute(
         select(func.count()).select_from(Issue).join(Newsletter).where(Newsletter.user_id == user.id)
@@ -257,6 +289,16 @@ async def sync_status(user: User = Depends(get_current_user), db: AsyncSession =
             Issue.processing_status.in_(["imported", "segmented", "failed"]),
         )
     )).scalar() or 0
+
+    # Recover stuck syncs (OAuth BackgroundTask killed on serverless, or Celery never ran)
+    if (
+        user.gmail_connected
+        and not user.initial_sync_complete
+        and user.sync_status != "syncing"
+    ):
+        _queue_gmail_sync(background_tasks, user.id)
+    elif user.gmail_connected and (pending > 0 or (article_count == 0 and issue_count > 0)):
+        background_tasks.add_task(_run_light_pipeline, user.id)
 
     return SyncStatusResponse(
         initial_sync_complete=user.initial_sync_complete,
@@ -277,10 +319,7 @@ async def trigger_sync(
 ):
     if not user.gmail_connected:
         raise HTTPException(status_code=400, detail="Gmail not connected")
-    try:
-        sync_user_gmail.delay(str(user.id))
-    except Exception as exc:
-        log.warning("celery_sync_unavailable", error=str(exc))
+    _queue_gmail_sync(background_tasks, user.id)
     if settings.simple_mode:
         background_tasks.add_task(_run_light_pipeline, user.id)
     return {"status": "sync_started"}

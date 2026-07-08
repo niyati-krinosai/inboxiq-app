@@ -207,19 +207,14 @@ export interface CategoriesResponse {
 }
 
 export interface SyncStatus {
-
   initial_sync_complete: boolean;
-
   last_sync_at: string | null;
-
   newsletter_count: number;
-
   issue_count: number;
-
   article_count: number;
-
   pending_processing?: number;
-
+  sync_status?: string;
+  gmail_connected?: boolean;
 }
 
 
