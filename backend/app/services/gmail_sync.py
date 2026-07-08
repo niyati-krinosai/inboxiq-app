@@ -192,6 +192,7 @@ async def discover_and_import_messages(
     service = get_gmail_service(user)
     imported = 0
     scanned = 0
+    commit_every = 25
 
     for msg_id in message_ids:
         scanned += 1
@@ -199,7 +200,10 @@ async def discover_and_import_messages(
             issue = await import_message(db, user, service, msg_id)
             if issue:
                 imported += 1
+            if scanned % commit_every == 0:
+                await db.commit()
         except Exception as e:
+            await db.rollback()
             log.warning("import_failed", message_id=msg_id, error=str(e))
 
     # Update frequency for all newsletters touched
@@ -214,6 +218,8 @@ async def discover_and_import_messages(
 async def initial_sync(db: AsyncSession, user: User) -> dict[str, Any]:
     """Phase 3: historical import of all detected newsletter issues."""
     user.sync_status = "syncing"
+    await db.commit()
+
     service = get_gmail_service(user)
 
     profile = await _gmail_execute(service, service.users().getProfile(userId="me"))
@@ -226,6 +232,8 @@ async def initial_sync(db: AsyncSession, user: User) -> dict[str, Any]:
         settings.initial_sync_max_messages,
     )
 
+    result = await db.execute(select(User).where(User.id == user.id))
+    user = result.scalar_one()
     result = await discover_and_import_messages(db, user, messages)
 
     user.gmail_history_id = str(history_id)
