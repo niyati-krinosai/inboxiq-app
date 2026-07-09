@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -191,7 +191,8 @@ async def discover_and_import_messages(
 ) -> dict[str, Any]:
     # IMPORTANT: use a stable scalar user_id; the ORM instance can become expired
     # after rollbacks/commits, and touching attributes can trigger IO in bad contexts.
-    user_id = user.id
+    identity = inspect(user).identity
+    user_id = identity[0] if identity else user.id
     service = get_gmail_service(user)
     imported = 0
     scanned = 0
@@ -286,6 +287,9 @@ async def incremental_sync(db: AsyncSession, user: User) -> dict[str, Any]:
     result = await discover_and_import_messages(db, user, new_message_ids)
 
     # Catch newsletters (e.g. TLDR) that history sync may have missed historically
+    uid = (inspect(user).identity or [user.id])[0]
+    refreshed = await db.execute(select(User).where(User.id == uid))
+    user = refreshed.scalar_one()
     supplemental_ids = await _collect_message_ids(
         service,
         ["from:(tldrnewsletter.com OR tldr.tech) newer_than:30d"],
