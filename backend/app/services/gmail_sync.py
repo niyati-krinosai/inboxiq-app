@@ -189,6 +189,9 @@ async def discover_and_import_messages(
     user: User,
     message_ids: list[str],
 ) -> dict[str, Any]:
+    # IMPORTANT: use a stable scalar user_id; the ORM instance can become expired
+    # after rollbacks/commits, and touching attributes can trigger IO in bad contexts.
+    user_id = user.id
     service = get_gmail_service(user)
     imported = 0
     scanned = 0
@@ -207,7 +210,7 @@ async def discover_and_import_messages(
             log.warning("import_failed", message_id=msg_id, error=str(e))
 
     # Update frequency for all newsletters touched
-    result = await db.execute(select(Newsletter).where(Newsletter.user_id == user.id))
+    result = await db.execute(select(Newsletter).where(Newsletter.user_id == user_id))
     for newsletter in result.scalars().all():
         await update_newsletter_frequency(db, newsletter)
         newsletter.processing_status = "completed"
