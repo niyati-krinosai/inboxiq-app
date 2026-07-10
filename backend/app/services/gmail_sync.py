@@ -146,6 +146,25 @@ async def import_message(
     if existing.scalar_one_or_none():
         return None
 
+    # Same Gmail message may already exist under a lumped newsletter (e.g. all TLDR
+    # products shared one sender email). Move it instead of duplicating.
+    existing_any = await db.execute(
+        select(Issue)
+        .join(Newsletter)
+        .where(
+            Newsletter.user_id == user.id,
+            Issue.gmail_message_id == message_id,
+        )
+    )
+    prior = existing_any.scalar_one_or_none()
+    if prior:
+        prior.newsletter_id = newsletter.id
+        prior.sender_name = detection.sender_name or prior.sender_name
+        prior.sender_email = detection.sender_email or prior.sender_email
+        newsletter.last_sync_at = datetime.now(timezone.utc)
+        await db.flush()
+        return None
+
     html = _extract_html_from_payload(msg.get("payload", {}))
 
     issue = Issue(

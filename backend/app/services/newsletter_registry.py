@@ -55,31 +55,86 @@ async def update_newsletter_frequency(
     newsletter.frequency = estimate_frequency(dates)
 
 
+def _is_tldr_detection(detection: DetectionResult) -> bool:
+    domain = (detection.domain or "").lower()
+    name = (detection.sender_name or "").lower()
+    email = (detection.sender_email or "").lower()
+    return (
+        "tldr" in domain
+        or "tldr" in name
+        or "tldrnewsletter.com" in email
+        or "tldr.tech" in email
+    )
+
+
+def _tldr_storage_email(detection: DetectionResult, name: str) -> str:
+    """TLDR products share dan@tldrnewsletter.com — use a per-product email key."""
+    domain = detection.domain or "tldrnewsletter.com"
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "tldr"
+    return f"{slug}@{domain}"
+
+
 async def register_newsletter(
     db: AsyncSession,
     user_id,
     detection: DetectionResult,
     received_at: datetime,
 ) -> Newsletter:
-    result = await db.execute(
-        select(Newsletter).where(
-            Newsletter.user_id == user_id,
-            Newsletter.sender_email == detection.sender_email,
-        )
+    name = _resolve_newsletter_name(detection)
+    is_tldr = _is_tldr_detection(detection)
+    storage_email = (
+        _tldr_storage_email(detection, name) if is_tldr else detection.sender_email
     )
-    newsletter = result.scalar_one_or_none()
+
+    if is_tldr:
+        # Match by product name so TLDR AI / TLDR Marketing stay separate
+        result = await db.execute(
+            select(Newsletter).where(
+                Newsletter.user_id == user_id,
+                Newsletter.name == name,
+            )
+        )
+        newsletter = result.scalar_one_or_none()
+        if not newsletter:
+            # Legacy row keyed only by shared dan@ email
+            result = await db.execute(
+                select(Newsletter).where(
+                    Newsletter.user_id == user_id,
+                    Newsletter.sender_email == detection.sender_email,
+                    Newsletter.name == name,
+                )
+            )
+            newsletter = result.scalar_one_or_none()
+    else:
+        result = await db.execute(
+            select(Newsletter).where(
+                Newsletter.user_id == user_id,
+                Newsletter.sender_email == detection.sender_email,
+            )
+        )
+        newsletter = result.scalar_one_or_none()
 
     if newsletter:
         newsletter.last_seen_at = max(newsletter.last_seen_at, received_at)
         if detection.sender_name and not newsletter.sender_name:
             newsletter.sender_name = detection.sender_name
+        if is_tldr and newsletter.sender_email == detection.sender_email:
+            # Migrate legacy shared-email row to per-product key when safe
+            clash = await db.execute(
+                select(Newsletter).where(
+                    Newsletter.user_id == user_id,
+                    Newsletter.sender_email == storage_email,
+                    Newsletter.id != newsletter.id,
+                )
+            )
+            if clash.scalar_one_or_none() is None:
+                newsletter.sender_email = storage_email
         return newsletter
 
-    name = _resolve_newsletter_name(detection)
     newsletter = Newsletter(
         user_id=user_id,
         name=name,
-        sender_email=detection.sender_email,
+        sender_email=storage_email,
         sender_name=detection.sender_name or None,
         domain=detection.domain or None,
         detection_signals=detection_signals_to_json(detection.signals),
