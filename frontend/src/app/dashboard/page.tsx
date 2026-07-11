@@ -7,7 +7,6 @@ import { getToken, clearToken } from "@/lib/api";
 import { Sidebar, View } from "@/components/Sidebar";
 import { ChatPanel } from "@/components/ChatPanel";
 import { TimelinePanel } from "@/components/TimelinePanel";
-import { SourcesPanel } from "@/components/SourcesPanel";
 import { SearchPanel } from "@/components/SearchPanel";
 import { Loader2 } from "lucide-react";
 
@@ -34,6 +33,8 @@ export default function DashboardPage() {
   const autoSyncStarted = useRef(false);
 
   const tldrOnly = isKrishnaUser(user);
+  const selectedModeLabel =
+    personalModes.find((m) => m.id === selectedCategory)?.label ?? null;
 
   useEffect(() => {
     if (!getToken()) {
@@ -48,7 +49,7 @@ export default function DashboardPage() {
         const krishna =
           u.email?.toLowerCase() === KRISHNA_EMAIL || u.id === KRISHNA_ID;
         setCategories(krishna ? [] : c.categories);
-        setPersonalModes(krishna ? [] : (c.personal_modes ?? []));
+        setPersonalModes(c.personal_modes ?? []);
         if (
           s.gmail_connected &&
           !s.initial_sync_complete &&
@@ -81,7 +82,10 @@ export default function DashboardPage() {
   }, [router]);
 
   useEffect(() => {
-    if (tldrOnly && (activeView === "timeline" || activeView === "search")) {
+    if (tldrOnly && (activeView === "timeline" || activeView === "search" || activeView === "sources")) {
+      setActiveView("chat");
+    }
+    if (!tldrOnly && activeView === "sources") {
       setActiveView("chat");
     }
   }, [tldrOnly, activeView]);
@@ -176,12 +180,15 @@ export default function DashboardPage() {
 
         <main className="flex-1 overflow-hidden">
           {activeView === "chat" && (
-            <ChatPanel selectedCategory={selectedCategory} tldrOnly={tldrOnly} />
+            <ChatPanel
+              selectedCategory={selectedCategory}
+              selectedLabel={selectedModeLabel}
+              tldrOnly={tldrOnly}
+            />
           )}
           {activeView === "timeline" && !tldrOnly && (
             <TimelinePanel selectedCategory={selectedCategory} />
           )}
-          {activeView === "sources" && <SourcesPanel tldrOnly={tldrOnly} />}
           {activeView === "search" && !tldrOnly && (
             <SearchPanel selectedCategory={selectedCategory} />
           )}

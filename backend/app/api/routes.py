@@ -529,8 +529,8 @@ async def list_categories(
 
     krishna = is_krishna_user(user)
     personal = await discover_user_modes(db, user.id, tldr_only=krishna)
-    # Krishna's desk is TLDR-only — no topic / auto / newsletter modes in sidebar
+    # Krishna: TLDR newsletter buttons only (no topic/auto modes)
     return {
         "categories": [] if krishna else CATEGORIES,
-        "personal_modes": [] if krishna else personal,
+        "personal_modes": personal,
     }

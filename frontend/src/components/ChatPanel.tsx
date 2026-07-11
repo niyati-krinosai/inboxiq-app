@@ -14,6 +14,7 @@ interface Message {
 
 interface ChatPanelProps {
   selectedCategory: string | null;
+  selectedLabel?: string | null;
   tldrOnly?: boolean;
 }
 
@@ -77,7 +78,11 @@ const KRISHNA_SUGGESTIONS = [
   "What launched or raised funding in TLDR recently?",
 ];
 
-export function ChatPanel({ selectedCategory, tldrOnly = false }: ChatPanelProps) {
+export function ChatPanel({
+  selectedCategory,
+  selectedLabel = null,
+  tldrOnly = false,
+}: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -185,7 +190,10 @@ export function ChatPanel({ selectedCategory, tldrOnly = false }: ChatPanelProps
           {tldrOnly
             ? "Detailed digests from your TLDR newsletters"
             : "Detailed digests from your Gmail newsletters"}
-          {!tldrOnly && selectedCategory && (
+          {selectedLabel && (
+            <span className="text-[var(--accent)]"> · chatting in {selectedLabel}</span>
+          )}
+          {!selectedLabel && selectedCategory && !selectedCategory.startsWith("newsletter:") && (
             <span className="text-[var(--accent)]"> · {selectedCategory}</span>
           )}
         </p>
