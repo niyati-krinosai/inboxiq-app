@@ -28,7 +28,7 @@ const DEFAULT_TIMELINE_FILTERS = [
 
 const KRISHNA_TIMELINE_FILTERS = [
   { key: "24h", label: "Today" },
-  { key: "1w", label: "This week" },
+  { key: "1m", label: "This month" },
   { key: "all", label: "Unlimited" },
 ];
 
@@ -72,7 +72,7 @@ const DEFAULT_SUGGESTIONS = [
 
 const KRISHNA_SUGGESTIONS = [
   "Give me a detailed digest of TLDR today",
-  "What are the top TLDR stories this week?",
+  "What are the top TLDR stories this month?",
   "Summarize the most important AI updates from TLDR",
   "What launched or raised funding in TLDR recently?",
 ];

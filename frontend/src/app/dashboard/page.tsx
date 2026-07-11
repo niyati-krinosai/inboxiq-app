@@ -81,7 +81,7 @@ export default function DashboardPage() {
   }, [router]);
 
   useEffect(() => {
-    if (tldrOnly && activeView === "sources") {
+    if (tldrOnly && (activeView === "timeline" || activeView === "search")) {
       setActiveView("chat");
     }
   }, [tldrOnly, activeView]);
@@ -178,11 +178,13 @@ export default function DashboardPage() {
           {activeView === "chat" && (
             <ChatPanel selectedCategory={selectedCategory} tldrOnly={tldrOnly} />
           )}
-          {activeView === "timeline" && (
-            <TimelinePanel selectedCategory={selectedCategory} tldrOnly={tldrOnly} />
+          {activeView === "timeline" && !tldrOnly && (
+            <TimelinePanel selectedCategory={selectedCategory} />
           )}
-          {activeView === "sources" && !tldrOnly && <SourcesPanel />}
-          {activeView === "search" && <SearchPanel selectedCategory={selectedCategory} />}
+          {activeView === "sources" && <SourcesPanel tldrOnly={tldrOnly} />}
+          {activeView === "search" && !tldrOnly && (
+            <SearchPanel selectedCategory={selectedCategory} />
+          )}
         </main>
       </div>
     </div>

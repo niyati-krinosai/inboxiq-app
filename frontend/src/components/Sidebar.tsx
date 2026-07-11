@@ -12,7 +12,7 @@ interface SidebarProps {
   personalModes: PersonalMode[];
   selectedCategory: string | null;
   onCategoryChange: (category: string | null) => void;
-  /** Krishna mentor desk: Ask / Timeline / Search only, no modes or Sources */
+  /** Krishna mentor desk: Ask + Sources (TLDR only), no Timeline/Search/modes */
   tldrOnly?: boolean;
 }
 
@@ -71,7 +71,7 @@ export function Sidebar({
   const newsletterModes = personalModes.filter((m) => m.kind === "newsletter");
   const themeModes = personalModes.filter((m) => m.kind === "theme");
   const nav = tldrOnly
-    ? MAIN_NAV.filter((item) => item.id !== "sources")
+    ? MAIN_NAV.filter((item) => item.id === "chat" || item.id === "sources")
     : MAIN_NAV;
 
   return (
