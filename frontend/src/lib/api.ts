@@ -144,19 +144,13 @@ export interface CanonicalEvent {
 
 
 export interface Newsletter {
-
   id: string;
-
   name: string;
-
   sender_email: string;
-
   issue_count: number;
-
+  article_count?: number;
   domain: string | null;
-
   last_seen_at: string;
-
 }
 
 
