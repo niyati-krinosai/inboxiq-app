@@ -644,7 +644,7 @@ async def _fetch_articles(
         .join(Newsletter, Newsletter.id == Article.newsletter_id)
         .where(Article.user_id == user_id, Article.received_at >= cutoff)
     )
-    result = await db.execute(stmt.order_by(Article.received_at.desc()).limit(500))
+    result = await db.execute(stmt.order_by(Article.received_at.desc()).limit(2000))
     rows = list(result.all())
 
     if newsletter_id:

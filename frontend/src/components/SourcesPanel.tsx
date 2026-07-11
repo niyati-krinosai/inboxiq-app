@@ -26,14 +26,18 @@ export function SourcesPanel() {
   async function selectNewsletter(nl: Newsletter) {
     setSelected(nl);
     try {
-      const res = await fetch(
+      const token = localStorage.getItem("inboxiq_token");
+      const headers = { Authorization: `Bearer ${token}` };
+      let res = await fetch(
         `${getApiBase()}/newsletters/${nl.id}/articles?limit=5000`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("inboxiq_token")}`,
-          },
-        }
+        { headers }
       );
+      if (res.status === 422) {
+        res = await fetch(
+          `${getApiBase()}/newsletters/${nl.id}/articles?limit=100`,
+          { headers }
+        );
+      }
       const data = await res.json();
       setArticles(Array.isArray(data) ? data : []);
     } catch {
