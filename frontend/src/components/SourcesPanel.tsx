@@ -27,7 +27,7 @@ export function SourcesPanel() {
     setSelected(nl);
     try {
       const res = await fetch(
-        `${getApiBase()}/newsletters/${nl.id}/articles`,
+        `${getApiBase()}/newsletters/${nl.id}/articles?limit=5000`,
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("inboxiq_token")}`,
@@ -35,7 +35,7 @@ export function SourcesPanel() {
         }
       );
       const data = await res.json();
-      setArticles(data);
+      setArticles(Array.isArray(data) ? data : []);
     } catch {
       setArticles([]);
     }
@@ -68,7 +68,7 @@ export function SourcesPanel() {
                 >
                   <p className="truncate text-sm font-medium text-stone-800">{nl.name}</p>
                   <p className="mt-0.5 text-xs text-stone-400">
-                    {nl.issue_count} issues
+                    {nl.issue_count} issues · {nl.article_count ?? 0} articles
                   </p>
                 </button>
               </li>
@@ -86,6 +86,7 @@ export function SourcesPanel() {
               {selected.last_seen_at && (
                 <> · last seen {formatRelativeDate(selected.last_seen_at)}</>
               )}
+              <> · {articles.length} articles shown</>
             </p>
             <div className="mt-8 space-y-6">
               {articles.map((a) => (

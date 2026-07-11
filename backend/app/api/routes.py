@@ -388,7 +388,7 @@ async def newsletter_articles(
     newsletter_id: uuid.UUID,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    limit: int = Query(50, le=100),
+    limit: int = Query(500, le=5000),
 ):
     articles = await get_newsletter_articles(db, newsletter_id, user.id, limit)
     return [
