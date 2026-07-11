@@ -48,7 +48,7 @@ export default function DashboardPage() {
         const krishna =
           u.email?.toLowerCase() === KRISHNA_EMAIL || u.id === KRISHNA_ID;
         setCategories(krishna ? [] : c.categories);
-        setPersonalModes(c.personal_modes ?? []);
+        setPersonalModes(krishna ? [] : (c.personal_modes ?? []));
         if (
           s.gmail_connected &&
           !s.initial_sync_complete &&
@@ -81,7 +81,7 @@ export default function DashboardPage() {
   }, [router]);
 
   useEffect(() => {
-    if (tldrOnly && activeView === "timeline") {
+    if (tldrOnly && activeView === "sources") {
       setActiveView("chat");
     }
   }, [tldrOnly, activeView]);
@@ -175,11 +175,13 @@ export default function DashboardPage() {
         </header>
 
         <main className="flex-1 overflow-hidden">
-          {activeView === "chat" && <ChatPanel selectedCategory={selectedCategory} />}
-          {activeView === "timeline" && !tldrOnly && (
-            <TimelinePanel selectedCategory={selectedCategory} />
+          {activeView === "chat" && (
+            <ChatPanel selectedCategory={selectedCategory} tldrOnly={tldrOnly} />
           )}
-          {activeView === "sources" && <SourcesPanel tldrOnly={tldrOnly} />}
+          {activeView === "timeline" && (
+            <TimelinePanel selectedCategory={selectedCategory} tldrOnly={tldrOnly} />
+          )}
+          {activeView === "sources" && !tldrOnly && <SourcesPanel />}
           {activeView === "search" && <SearchPanel selectedCategory={selectedCategory} />}
         </main>
       </div>

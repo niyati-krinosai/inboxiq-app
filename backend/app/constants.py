@@ -66,6 +66,7 @@ TIMELINE_LABELS: dict[str, str] = {
     "1m": "this month",
     "2m": "the last 2 months",
     "3m": "the last 3 months",
+    "all": "all time",
 }
 
 TIMELINE_FILTERS: dict[str, int] = {
@@ -77,6 +78,7 @@ TIMELINE_FILTERS: dict[str, int] = {
     "1m": 30,
     "2m": 60,
     "3m": 90,
+    "all": 36500,  # effectively unlimited
 }
 
 KNOWN_NEWSLETTER_DOMAINS = frozenset({

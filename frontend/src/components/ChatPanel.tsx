@@ -14,15 +14,22 @@ interface Message {
 
 interface ChatPanelProps {
   selectedCategory: string | null;
+  tldrOnly?: boolean;
 }
 
-const TIMELINE_FILTERS = [
+const DEFAULT_TIMELINE_FILTERS = [
   { key: "24h", label: "Today" },
   { key: "2d", label: "2 days" },
   { key: "4d", label: "4 days" },
   { key: "1w", label: "This week" },
   { key: "2w", label: "2 weeks" },
   { key: "1m", label: "This month" },
+];
+
+const KRISHNA_TIMELINE_FILTERS = [
+  { key: "24h", label: "Today" },
+  { key: "1w", label: "This week" },
+  { key: "all", label: "Unlimited" },
 ];
 
 const MODE_SUGGESTIONS: Record<string, string[]> = {
@@ -63,17 +70,27 @@ const DEFAULT_SUGGESTIONS = [
   "New AI tools released recently",
 ];
 
-export function ChatPanel({ selectedCategory }: ChatPanelProps) {
+const KRISHNA_SUGGESTIONS = [
+  "Give me a detailed digest of TLDR today",
+  "What are the top TLDR stories this week?",
+  "Summarize the most important AI updates from TLDR",
+  "What launched or raised funding in TLDR recently?",
+];
+
+export function ChatPanel({ selectedCategory, tldrOnly = false }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [timeline, setTimeline] = useState("1w");
+  const [timeline, setTimeline] = useState(tldrOnly ? "all" : "1w");
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [pinnedArticle, setPinnedArticle] = useState<PinnedArticle | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const timelineFilters = tldrOnly ? KRISHNA_TIMELINE_FILTERS : DEFAULT_TIMELINE_FILTERS;
+
   const suggestions = useMemo(() => {
+    if (tldrOnly) return KRISHNA_SUGGESTIONS;
     if (selectedCategory && MODE_SUGGESTIONS[selectedCategory]) {
       return MODE_SUGGESTIONS[selectedCategory];
     }
@@ -92,7 +109,7 @@ export function ChatPanel({ selectedCategory }: ChatPanelProps) {
       ];
     }
     return DEFAULT_SUGGESTIONS;
-  }, [selectedCategory]);
+  }, [selectedCategory, tldrOnly]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -165,13 +182,15 @@ export function ChatPanel({ selectedCategory }: ChatPanelProps) {
       <div className="border-b border-[var(--border)] px-6 py-5">
         <h2 className="font-serif text-xl text-stone-900">Ask</h2>
         <p className="mt-1 text-sm text-stone-500">
-          Detailed digests from your Gmail newsletters
-          {selectedCategory && (
+          {tldrOnly
+            ? "Detailed digests from your TLDR newsletters"
+            : "Detailed digests from your Gmail newsletters"}
+          {!tldrOnly && selectedCategory && (
             <span className="text-[var(--accent)]"> · {selectedCategory}</span>
           )}
         </p>
         <div className="mt-4 flex flex-wrap gap-1">
-          {TIMELINE_FILTERS.map((f) => (
+          {timelineFilters.map((f) => (
             <button
               key={f.key}
               type="button"

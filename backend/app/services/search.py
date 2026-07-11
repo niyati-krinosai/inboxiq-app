@@ -16,7 +16,7 @@ settings = get_settings()
 
 
 def _timeline_cutoff(filter_key: str | None) -> datetime | None:
-    if not filter_key or filter_key not in TIMELINE_FILTERS:
+    if not filter_key or filter_key not in TIMELINE_FILTERS or filter_key == "all":
         return None
     days = TIMELINE_FILTERS[filter_key]
     return datetime.now(timezone.utc) - timedelta(days=days)

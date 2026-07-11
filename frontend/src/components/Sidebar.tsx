@@ -12,7 +12,7 @@ interface SidebarProps {
   personalModes: PersonalMode[];
   selectedCategory: string | null;
   onCategoryChange: (category: string | null) => void;
-  /** Krishna mentor desk: TLDR newsletters only, no timeline / modes chrome */
+  /** Krishna mentor desk: Ask / Timeline / Search only, no modes or Sources */
   tldrOnly?: boolean;
 }
 
@@ -58,12 +58,6 @@ function ModeButton({
   );
 }
 
-function isTldrMode(m: PersonalMode): boolean {
-  const label = (m.label || "").toLowerCase();
-  const desc = (m.description || "").toLowerCase();
-  return label.includes("tldr") || desc.includes("tldr");
-}
-
 export function Sidebar({
   activeView,
   onViewChange,
@@ -74,11 +68,11 @@ export function Sidebar({
   tldrOnly = false,
 }: SidebarProps) {
   const displayCategories = categories.length > 0 ? categories : FEATURED_CATEGORIES;
-  const newsletterModes = personalModes
-    .filter((m) => m.kind === "newsletter")
-    .filter((m) => (tldrOnly ? isTldrMode(m) : true));
-  const themeModes = tldrOnly ? [] : personalModes.filter((m) => m.kind === "theme");
-  const nav = tldrOnly ? MAIN_NAV.filter((item) => item.id !== "timeline") : MAIN_NAV;
+  const newsletterModes = personalModes.filter((m) => m.kind === "newsletter");
+  const themeModes = personalModes.filter((m) => m.kind === "theme");
+  const nav = tldrOnly
+    ? MAIN_NAV.filter((item) => item.id !== "sources")
+    : MAIN_NAV;
 
   return (
     <aside className="flex h-full w-56 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--warm)]">
@@ -90,7 +84,7 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
-        <ul className="mb-6 space-y-0.5">
+        <ul className={cn("space-y-0.5", !tldrOnly && "mb-6")}>
           {nav.map(({ id, label }) => (
             <li key={id}>
               <button
@@ -108,27 +102,7 @@ export function Sidebar({
           ))}
         </ul>
 
-        {tldrOnly ? (
-          newsletterModes.length > 0 && (
-            <>
-              <p className="mb-2 px-3 text-[11px] font-medium tracking-wider text-stone-400 uppercase">
-                TLDR products
-              </p>
-              <ul className="space-y-0.5">
-                {newsletterModes.map((m) => (
-                  <li key={m.id}>
-                    <ModeButton
-                      label={m.label}
-                      sub={m.description}
-                      active={selectedCategory === m.id}
-                      onClick={() => onCategoryChange(m.id)}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </>
-          )
-        ) : (
+        {!tldrOnly && (
           <>
             <ModeButton
               label="All modes"

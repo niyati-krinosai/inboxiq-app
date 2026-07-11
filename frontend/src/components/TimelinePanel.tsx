@@ -6,7 +6,7 @@ import { EventCard } from "./EventCard";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const TIMELINE_FILTERS = [
+const DEFAULT_TIMELINE_FILTERS = [
   { key: "24h", label: "Today" },
   { key: "2d", label: "Yesterday" },
   { key: "4d", label: "2 days ago" },
@@ -15,12 +15,20 @@ const TIMELINE_FILTERS = [
   { key: "1m", label: "This month" },
 ];
 
+const KRISHNA_TIMELINE_FILTERS = [
+  { key: "24h", label: "Today" },
+  { key: "1w", label: "This week" },
+  { key: "all", label: "Unlimited" },
+];
+
 interface TimelinePanelProps {
   selectedCategory: string | null;
+  tldrOnly?: boolean;
 }
 
-export function TimelinePanel({ selectedCategory }: TimelinePanelProps) {
-  const [filter, setFilter] = useState("1w");
+export function TimelinePanel({ selectedCategory, tldrOnly = false }: TimelinePanelProps) {
+  const filters = tldrOnly ? KRISHNA_TIMELINE_FILTERS : DEFAULT_TIMELINE_FILTERS;
+  const [filter, setFilter] = useState(tldrOnly ? "all" : "1w");
   const [events, setEvents] = useState<CanonicalEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -38,13 +46,15 @@ export function TimelinePanel({ selectedCategory }: TimelinePanelProps) {
       <div className="border-b border-[var(--border)] px-6 py-5">
         <h2 className="font-serif text-xl text-stone-900">Timeline</h2>
         <p className="mt-1 text-sm text-stone-500">
-          Stories from your newsletters, deduplicated
-          {selectedCategory && (
+          {tldrOnly
+            ? "Stories from your TLDR newsletters"
+            : "Stories from your newsletters, deduplicated"}
+          {!tldrOnly && selectedCategory && (
             <span className="text-[var(--accent)]"> · {selectedCategory}</span>
           )}
         </p>
         <div className="mt-4 flex flex-wrap gap-1">
-          {TIMELINE_FILTERS.map((f) => (
+          {filters.map((f) => (
             <button
               key={f.key}
               onClick={() => setFilter(f.key)}

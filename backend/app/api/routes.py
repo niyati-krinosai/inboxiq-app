@@ -419,7 +419,15 @@ async def timeline(
     category: str | None = None,
     limit: int = Query(50, le=100),
 ):
+    from app.services.mentor_profile import is_krishna_user
+
     events = await get_timeline_events(db, user.id, timeline=filter, category=category, limit=limit)
+    if is_krishna_user(user):
+        events = [
+            e
+            for e in events
+            if any("tldr" in (getattr(s, "newsletter_name", "") or "").lower() for s in (e.sources or []))
+        ]
     return TimelineResponse(
         events=[_event_to_response(e) for e in events],
         total=len(events),
@@ -442,11 +450,20 @@ async def search(
     limit: int = Query(20, le=100),
     offset: int = Query(0, ge=0),
 ):
+    from app.services.mentor_profile import is_krishna_user
+
     events, total = await search_events(
         db, user.id, query=q, category=category, timeline=timeline,
         entity_type=entity_type, entity_value=entity_value,
         limit=limit, offset=offset, semantic=semantic,
     )
+    if is_krishna_user(user):
+        events = [
+            e
+            for e in events
+            if any("tldr" in (getattr(s, "newsletter_name", "") or "").lower() for s in (e.sources or []))
+        ]
+        total = len(events)
     return SearchResponse(events=[_event_to_response(e) for e in events], total=total, query=q)
 
 
@@ -512,8 +529,8 @@ async def list_categories(
 
     krishna = is_krishna_user(user)
     personal = await discover_user_modes(db, user.id, tldr_only=krishna)
-    # Krishna's desk is TLDR-only — no topic / auto modes
+    # Krishna's desk is TLDR-only — no topic / auto / newsletter modes in sidebar
     return {
         "categories": [] if krishna else CATEGORIES,
-        "personal_modes": personal,
+        "personal_modes": [] if krishna else personal,
     }
