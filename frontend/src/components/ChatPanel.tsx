@@ -220,7 +220,7 @@ export function ChatPanel({
         {messages.length === 0 ? (
           <div className="mx-auto max-w-xl">
             <p className="text-sm leading-relaxed text-stone-600">
-              Pick a mode on the left and a timeline above, then ask for a detailed
+              Pick a newsletter on the left and a timeline above, then ask for a detailed
               summary. Click <strong>Ask more</strong> on any story to deep-dive and
               chat about it.
             </p>
