@@ -173,13 +173,23 @@ async def get_timeline_events(
     return events[:limit]
 
 
-async def get_newsletters(db: AsyncSession, user_id: uuid.UUID) -> list[Newsletter]:
+async def get_newsletters(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    tldr_only: bool = False,
+) -> list[Newsletter]:
+    from app.services.mentor_profile import filter_tldr_newsletters
+
     result = await db.execute(
         select(Newsletter)
         .where(Newsletter.user_id == user_id)
         .order_by(Newsletter.issue_count.desc())
     )
-    return list(result.scalars().all())
+    newsletters = list(result.scalars().all())
+    if tldr_only:
+        return filter_tldr_newsletters(newsletters)
+    return newsletters
 
 
 async def get_newsletter_detail(db: AsyncSession, newsletter_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:

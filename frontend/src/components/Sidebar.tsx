@@ -12,6 +12,8 @@ interface SidebarProps {
   personalModes: PersonalMode[];
   selectedCategory: string | null;
   onCategoryChange: (category: string | null) => void;
+  /** Krishna mentor desk: TLDR newsletters only, no timeline / modes chrome */
+  tldrOnly?: boolean;
 }
 
 const MAIN_NAV: { id: View; label: string }[] = [
@@ -56,6 +58,12 @@ function ModeButton({
   );
 }
 
+function isTldrMode(m: PersonalMode): boolean {
+  const label = (m.label || "").toLowerCase();
+  const desc = (m.description || "").toLowerCase();
+  return label.includes("tldr") || desc.includes("tldr");
+}
+
 export function Sidebar({
   activeView,
   onViewChange,
@@ -63,21 +71,27 @@ export function Sidebar({
   personalModes,
   selectedCategory,
   onCategoryChange,
+  tldrOnly = false,
 }: SidebarProps) {
   const displayCategories = categories.length > 0 ? categories : FEATURED_CATEGORIES;
-  const newsletterModes = personalModes.filter((m) => m.kind === "newsletter");
-  const themeModes = personalModes.filter((m) => m.kind === "theme");
+  const newsletterModes = personalModes
+    .filter((m) => m.kind === "newsletter")
+    .filter((m) => (tldrOnly ? isTldrMode(m) : true));
+  const themeModes = tldrOnly ? [] : personalModes.filter((m) => m.kind === "theme");
+  const nav = tldrOnly ? MAIN_NAV.filter((item) => item.id !== "timeline") : MAIN_NAV;
 
   return (
     <aside className="flex h-full w-56 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--warm)]">
       <div className="border-b border-[var(--border)] px-5 py-5">
         <h1 className="font-serif text-lg tracking-tight text-stone-900">InboxIQ</h1>
-        <p className="mt-0.5 text-xs text-stone-500">Your newsletter desk</p>
+        <p className="mt-0.5 text-xs text-stone-500">
+          {tldrOnly ? "Your TLDR desk" : "Your newsletter desk"}
+        </p>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         <ul className="mb-6 space-y-0.5">
-          {MAIN_NAV.map(({ id, label }) => (
+          {nav.map(({ id, label }) => (
             <li key={id}>
               <button
                 onClick={() => onViewChange(id)}
@@ -94,62 +108,90 @@ export function Sidebar({
           ))}
         </ul>
 
-        <ModeButton label="All modes" active={!selectedCategory} onClick={() => onCategoryChange(null)} />
-
-        {newsletterModes.length > 0 && (
+        {tldrOnly ? (
+          newsletterModes.length > 0 && (
+            <>
+              <p className="mb-2 px-3 text-[11px] font-medium tracking-wider text-stone-400 uppercase">
+                TLDR products
+              </p>
+              <ul className="space-y-0.5">
+                {newsletterModes.map((m) => (
+                  <li key={m.id}>
+                    <ModeButton
+                      label={m.label}
+                      sub={m.description}
+                      active={selectedCategory === m.id}
+                      onClick={() => onCategoryChange(m.id)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </>
+          )
+        ) : (
           <>
+            <ModeButton
+              label="All modes"
+              active={!selectedCategory}
+              onClick={() => onCategoryChange(null)}
+            />
+
+            {newsletterModes.length > 0 && (
+              <>
+                <p className="mb-2 mt-5 px-3 text-[11px] font-medium tracking-wider text-stone-400 uppercase">
+                  Your newsletters
+                </p>
+                <ul className="space-y-0.5">
+                  {newsletterModes.map((m) => (
+                    <li key={m.id}>
+                      <ModeButton
+                        label={m.label}
+                        sub={m.description}
+                        active={selectedCategory === m.id}
+                        onClick={() => onCategoryChange(m.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {themeModes.length > 0 && (
+              <>
+                <p className="mb-2 mt-5 px-3 text-[11px] font-medium tracking-wider text-stone-400 uppercase">
+                  Auto-organized
+                </p>
+                <ul className="space-y-0.5">
+                  {themeModes.map((m) => (
+                    <li key={m.id}>
+                      <ModeButton
+                        label={m.label}
+                        sub={m.description}
+                        active={selectedCategory === m.id}
+                        onClick={() => onCategoryChange(m.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
             <p className="mb-2 mt-5 px-3 text-[11px] font-medium tracking-wider text-stone-400 uppercase">
-              Your newsletters
+              Topic modes
             </p>
             <ul className="space-y-0.5">
-              {newsletterModes.map((m) => (
-                <li key={m.id}>
+              {displayCategories.map((cat) => (
+                <li key={cat}>
                   <ModeButton
-                    label={m.label}
-                    sub={m.description}
-                    active={selectedCategory === m.id}
-                    onClick={() => onCategoryChange(m.id)}
+                    label={cat}
+                    active={selectedCategory === cat}
+                    onClick={() => onCategoryChange(cat)}
                   />
                 </li>
               ))}
             </ul>
           </>
         )}
-
-        {themeModes.length > 0 && (
-          <>
-            <p className="mb-2 mt-5 px-3 text-[11px] font-medium tracking-wider text-stone-400 uppercase">
-              Auto-organized
-            </p>
-            <ul className="space-y-0.5">
-              {themeModes.map((m) => (
-                <li key={m.id}>
-                  <ModeButton
-                    label={m.label}
-                    sub={m.description}
-                    active={selectedCategory === m.id}
-                    onClick={() => onCategoryChange(m.id)}
-                  />
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-
-        <p className="mb-2 mt-5 px-3 text-[11px] font-medium tracking-wider text-stone-400 uppercase">
-          Topic modes
-        </p>
-        <ul className="space-y-0.5">
-          {displayCategories.map((cat) => (
-            <li key={cat}>
-              <ModeButton
-                label={cat}
-                active={selectedCategory === cat}
-                onClick={() => onCategoryChange(cat)}
-              />
-            </li>
-          ))}
-        </ul>
       </nav>
     </aside>
   );

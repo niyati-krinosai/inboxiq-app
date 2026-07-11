@@ -2,9 +2,8 @@
 
 import re
 import uuid
-from collections import Counter
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import CATEGORY_KEYWORDS
@@ -24,14 +23,23 @@ _MIN_THEME_ARTICLES = 3
 _MIN_NEWSLETTER_ISSUES = 1
 
 
-async def discover_user_modes(db: AsyncSession, user_id: uuid.UUID) -> list[dict]:
+async def discover_user_modes(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    tldr_only: bool = False,
+) -> list[dict]:
     """Build stable, user-specific modes from subscriptions + reading patterns."""
+    from app.services.mentor_profile import is_tldr_newsletter
+
     nl_result = await db.execute(
         select(Newsletter)
         .where(Newsletter.user_id == user_id)
         .order_by(Newsletter.issue_count.desc())
     )
     newsletters = list(nl_result.scalars().all())
+    if tldr_only:
+        newsletters = [nl for nl in newsletters if is_tldr_newsletter(nl)]
 
     modes: list[dict] = []
 
@@ -48,6 +56,10 @@ async def discover_user_modes(db: AsyncSession, user_id: uuid.UUID) -> list[dict
             "newsletter_id": str(nl.id),
         })
 
+    # Krishna / TLDR-only desk: newsletter modes only (no auto themes)
+    if tldr_only:
+        return modes[:24]
+
     # ── Auto themes from recent article titles ────────────────────────────────
     title_result = await db.execute(
         select(Article.title)
@@ -56,7 +68,6 @@ async def discover_user_modes(db: AsyncSession, user_id: uuid.UUID) -> list[dict
         .limit(400)
     )
     titles = [row[0] or "" for row in title_result.all()]
-    blob = " ".join(titles).lower()
 
     static_labels = {c.lower() for c in CATEGORY_KEYWORDS}
     for theme, keywords in _THEME_KEYWORDS.items():
@@ -71,13 +82,6 @@ async def discover_user_modes(db: AsyncSession, user_id: uuid.UUID) -> list[dict
                 "description": f"{hits} recent stories",
                 "keywords": keywords,
             })
-
-    # ── Domain grouping for similar senders ─────────────────────────────────
-    domain_counts: Counter[str] = Counter()
-    for nl in newsletters:
-        domain = (nl.domain or nl.sender_email.split("@")[-1] if nl.sender_email else "").lower()
-        if domain and domain not in ("gmail.com", "googlemail.com"):
-            domain_counts[domain] += nl.issue_count or 0
 
     return modes[:24]
 

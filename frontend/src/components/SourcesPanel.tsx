@@ -7,7 +7,7 @@ import { formatRelativeDate } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export function SourcesPanel() {
+export function SourcesPanel({ tldrOnly = false }: { tldrOnly?: boolean }) {
   const [newsletters, setNewsletters] = useState<Newsletter[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Newsletter | null>(null);
@@ -18,10 +18,21 @@ export function SourcesPanel() {
   useEffect(() => {
     api
       .getNewsletters()
-      .then(setNewsletters)
+      .then((list) => {
+        if (!tldrOnly) {
+          setNewsletters(list);
+          return;
+        }
+        setNewsletters(
+          list.filter((nl) => {
+            const blob = `${nl.name} ${nl.sender_email} ${nl.domain || ""}`.toLowerCase();
+            return blob.includes("tldr");
+          })
+        );
+      })
       .catch(() => setNewsletters([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [tldrOnly]);
 
   async function selectNewsletter(nl: Newsletter) {
     setSelected(nl);
@@ -50,7 +61,11 @@ export function SourcesPanel() {
       <div className="w-72 shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--bg)]">
         <div className="border-b border-[var(--border)] px-5 py-5">
           <h2 className="font-serif text-xl text-stone-900">Sources</h2>
-          <p className="mt-1 text-sm text-stone-500">Newsletters we found in your Gmail</p>
+          <p className="mt-1 text-sm text-stone-500">
+            {tldrOnly
+              ? "Your TLDR products and scraped articles"
+              : "Newsletters we found in your Gmail"}
+          </p>
         </div>
 
         {loading ? (

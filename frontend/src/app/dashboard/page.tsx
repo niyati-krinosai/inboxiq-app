@@ -11,6 +11,16 @@ import { SourcesPanel } from "@/components/SourcesPanel";
 import { SearchPanel } from "@/components/SearchPanel";
 import { Loader2 } from "lucide-react";
 
+const KRISHNA_EMAIL = "krsgupta@ucdavis.edu";
+const KRISHNA_ID = "6ec76ebf-2f36-4dfa-8ee0-620d51ed5b46";
+
+function isKrishnaUser(user: User | null): boolean {
+  if (!user) return false;
+  return (
+    user.email?.toLowerCase() === KRISHNA_EMAIL || user.id === KRISHNA_ID
+  );
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -23,6 +33,8 @@ export default function DashboardPage() {
   const [syncing, setSyncing] = useState(false);
   const autoSyncStarted = useRef(false);
 
+  const tldrOnly = isKrishnaUser(user);
+
   useEffect(() => {
     if (!getToken()) {
       router.push("/");
@@ -33,7 +45,9 @@ export default function DashboardPage() {
       .then(async ([u, s, c]) => {
         setUser(u);
         setSyncStatus(s);
-        setCategories(c.categories);
+        const krishna =
+          u.email?.toLowerCase() === KRISHNA_EMAIL || u.id === KRISHNA_ID;
+        setCategories(krishna ? [] : c.categories);
         setPersonalModes(c.personal_modes ?? []);
         if (
           s.gmail_connected &&
@@ -65,6 +79,12 @@ export default function DashboardPage() {
     }, 10000);
     return () => clearInterval(interval);
   }, [router]);
+
+  useEffect(() => {
+    if (tldrOnly && activeView === "timeline") {
+      setActiveView("chat");
+    }
+  }, [tldrOnly, activeView]);
 
   async function handleSync() {
     setSyncing(true);
@@ -98,6 +118,7 @@ export default function DashboardPage() {
         personalModes={personalModes}
         selectedCategory={selectedCategory}
         onCategoryChange={setSelectedCategory}
+        tldrOnly={tldrOnly}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden bg-[var(--surface)]">
@@ -105,8 +126,10 @@ export default function DashboardPage() {
           <div className="text-xs text-stone-500">
             {syncStatus && (
               <>
-                {syncStatus.newsletter_count} newsletters · {syncStatus.article_count} articles
-                {syncStatus.sync_status === "syncing" && (
+                {tldrOnly
+                  ? "TLDR desk"
+                  : `${syncStatus.newsletter_count} newsletters · ${syncStatus.article_count} articles`}
+                {!tldrOnly && syncStatus.sync_status === "syncing" && (
                   <span className="ml-2 text-amber-700">
                     · importing from Gmail
                     <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />
@@ -115,7 +138,8 @@ export default function DashboardPage() {
                 {syncStatus.sync_status === "failed" && (
                   <span className="ml-2 text-red-600">· sync failed — click Sync now</span>
                 )}
-                {!syncStatus.initial_sync_complete &&
+                {!tldrOnly &&
+                  !syncStatus.initial_sync_complete &&
                   syncStatus.sync_status !== "syncing" &&
                   syncStatus.sync_status !== "failed" &&
                   syncStatus.gmail_connected && (
@@ -128,13 +152,15 @@ export default function DashboardPage() {
             )}
           </div>
           <div className="flex items-center gap-4">
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="text-xs text-stone-500 underline decoration-stone-300 underline-offset-2 hover:text-[var(--accent)] disabled:opacity-50"
-            >
-              {syncing ? "Syncing…" : "Sync now"}
-            </button>
+            {!tldrOnly && (
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="text-xs text-stone-500 underline decoration-stone-300 underline-offset-2 hover:text-[var(--accent)] disabled:opacity-50"
+              >
+                {syncing ? "Syncing…" : "Sync now"}
+              </button>
+            )}
             <span className="text-sm text-stone-600">{user?.name || user?.email}</span>
             {user?.picture && (
               <img src={user.picture} alt="" className="h-7 w-7 rounded-full ring-1 ring-[var(--border)]" />
@@ -150,8 +176,10 @@ export default function DashboardPage() {
 
         <main className="flex-1 overflow-hidden">
           {activeView === "chat" && <ChatPanel selectedCategory={selectedCategory} />}
-          {activeView === "timeline" && <TimelinePanel selectedCategory={selectedCategory} />}
-          {activeView === "sources" && <SourcesPanel />}
+          {activeView === "timeline" && !tldrOnly && (
+            <TimelinePanel selectedCategory={selectedCategory} />
+          )}
+          {activeView === "sources" && <SourcesPanel tldrOnly={tldrOnly} />}
           {activeView === "search" && <SearchPanel selectedCategory={selectedCategory} />}
         </main>
       </div>

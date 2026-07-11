@@ -362,7 +362,9 @@ async def process_newsletters(
 
 @router.get("/newsletters", response_model=list[NewsletterResponse])
 async def list_newsletters(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    newsletters = await get_newsletters(db, user.id)
+    from app.services.mentor_profile import is_krishna_user
+
+    newsletters = await get_newsletters(db, user.id, tldr_only=is_krishna_user(user))
     result = []
     for nl in newsletters:
         detail = await get_newsletter_detail(db, nl.id, user.id)
@@ -505,7 +507,13 @@ async def list_categories(
     db: AsyncSession = Depends(get_db),
 ):
     from app.constants import CATEGORIES
+    from app.services.mentor_profile import is_krishna_user
     from app.services.user_modes import discover_user_modes
 
-    personal = await discover_user_modes(db, user.id)
-    return {"categories": CATEGORIES, "personal_modes": personal}
+    krishna = is_krishna_user(user)
+    personal = await discover_user_modes(db, user.id, tldr_only=krishna)
+    # Krishna's desk is TLDR-only — no topic / auto modes
+    return {
+        "categories": [] if krishna else CATEGORIES,
+        "personal_modes": personal,
+    }

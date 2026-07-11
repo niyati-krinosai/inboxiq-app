@@ -644,6 +644,25 @@ async def _fetch_articles(
         .join(Newsletter, Newsletter.id == Article.newsletter_id)
         .where(Article.user_id == user_id, Article.received_at >= cutoff)
     )
+
+    # Krishna mentor desk: only TLDR products
+    from app.models.user import User as UserModel
+    from app.services.mentor_profile import is_krishna_user, is_tldr_newsletter
+
+    user_row = await db.get(UserModel, user_id)
+    if user_row and is_krishna_user(user_row):
+        tldr_ids = [
+            nl.id
+            for nl in (
+                await db.execute(select(Newsletter).where(Newsletter.user_id == user_id))
+            ).scalars()
+            if is_tldr_newsletter(nl)
+        ]
+        if tldr_ids:
+            stmt = stmt.where(Article.newsletter_id.in_(tldr_ids))
+        else:
+            return []
+
     result = await db.execute(stmt.order_by(Article.received_at.desc()).limit(2000))
     rows = list(result.all())
 
