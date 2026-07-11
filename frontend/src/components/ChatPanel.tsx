@@ -72,10 +72,10 @@ const DEFAULT_SUGGESTIONS = [
 ];
 
 const KRISHNA_SUGGESTIONS = [
-  "Give me a detailed digest of TLDR today",
-  "What are the top TLDR stories this month?",
-  "Summarize the most important AI updates from TLDR",
-  "What launched or raised funding in TLDR recently?",
+  "Tell me all the TLDR news for this timeline",
+  "Give me every Fintech story in this period",
+  "Summarize all AI updates from TLDR",
+  "What launched or raised funding in TLDR?",
 ];
 
 export function ChatPanel({
@@ -350,6 +350,11 @@ function ChatResponseCard({
         <h3 className="font-serif text-xl text-stone-900">{response.headline}</h3>
         {response.brief_summary && (
           <p className="mt-2 leading-relaxed text-stone-600">{response.brief_summary}</p>
+        )}
+        {items.length > 0 && (
+          <p className="mt-2 text-xs font-medium tracking-wide text-stone-500 uppercase">
+            {items.length} {items.length === 1 ? "story" : "stories"} · full list
+          </p>
         )}
       </div>
 

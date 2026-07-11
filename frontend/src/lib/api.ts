@@ -28,21 +28,32 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 
   if (token) headers.Authorization = `Bearer ${token}`;
 
-
+  // Large full-timeline digests can take a while on cold Render instances
+  const controller = new AbortController();
+  const timeoutMs = path === "/chat" ? 180000 : 60000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
 
   try {
 
-    res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+      signal: options.signal ?? controller.signal,
+    });
 
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Request timed out. Try a shorter timeline, or ask again.");
+    }
     const hint = isLocalDev()
       ? "Cannot reach the server. Run: docker compose up -d"
       : "Cannot reach InboxIQ right now. Please try again in a moment.";
     throw new Error(hint);
+  } finally {
+    clearTimeout(timer);
   }
-
 
 
   if (res.status === 401) {

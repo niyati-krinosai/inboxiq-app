@@ -22,10 +22,9 @@ from app.services.chat_memory import (
 )
 from app.services.user_modes import parse_mode_filter
 
-MAX_DIGEST_ITEMS = 20
-MAX_SEARCH_ITEMS = 8
-MAX_ELABORATE_ITEMS = 3
-MIN_RELEVANCE_SCORE = 0.22
+# Elaborate still deep-dives one story; digests/search return the full timeline set.
+# Above this count, use stored/heuristic summaries (LLM would time out / cost too much).
+LLM_SUMMARY_CAP = 12
 
 _STOPWORDS = frozenset({
     "the", "and", "for", "are", "but", "not", "you", "all", "can", "her", "was",
@@ -99,7 +98,8 @@ def _classify_intent(question: str) -> str:
         return "elaborate"
     if re.search(
         r"\b(summarize|summary|digest|recap|roundup|what happened|updates?|"
-        r"stories|highlights|catch me up|everything)\b",
+        r"stories|highlights|catch me up|everything|all (the )?news|the news|"
+        r"tell me (the )?news|news in|news about)\b",
         q,
     ):
         return "digest"
@@ -412,7 +412,10 @@ def _build_response(
         brief = f"Found {len(items)} stor{'y' if len(items) == 1 else 'ies'} from {period}."
     else:
         headline = f"{mode_label} — {period}"
-        brief = f"{len(items)} stories from your {mode_label} newsletters ({period})."
+        brief = (
+            f"All {len(items)} matching stor{'y' if len(items) == 1 else 'ies'} "
+            f"from {period} (complete list, not a top-N)."
+        )
 
     return {
         "headline": headline,
@@ -420,7 +423,7 @@ def _build_response(
         "why_it_matters": "",
         "items": items,
         "sources": [{"newsletter": i["newsletter"], "url": i["url"]} for i in items],
-        "related_news": [i["title"] for i in items[1:6]],
+        "related_news": [],
     }
 
 
@@ -463,6 +466,10 @@ async def simple_chat(
             return followup
 
     intent = _classify_intent(question)
+    topics_from_q = _infer_topics_from_question(question)
+    # Topic / mode listing questions should dump the full timeline set, not a short search hit list.
+    if intent == "search" and (topics_from_q or category_filter):
+        intent = "digest"
     if intent in ("greeting", "help", "vague"):
         result = {**_conversational_response(intent, question), "why_it_matters": ""}
         result["session_id"] = str(session.id)
@@ -491,19 +498,13 @@ async def simple_chat(
         search_question = question
         q_tokens = _query_tokens(search_question)
 
-    # Digest with a mode selected and vague question → use mode as primary filter
-    topics_from_q = _infer_topics_from_question(question)
-    strict_mode = (
-        intent == "digest"
-        and (static_mode or theme_keywords)
-        and len(q_tokens) <= 4
-    )
-
     mode_label = static_mode or category_filter or "Your newsletters"
     if category_filter and category_filter.startswith("newsletter:"):
         nl_row = await db.get(Newsletter, uuid.UUID(newsletter_id)) if newsletter_id else None
         if nl_row:
             mode_label = nl_row.name
+    elif topics_from_q:
+        mode_label = topics_from_q[0]
 
     items = await _fetch_articles(
         db=db,
@@ -513,13 +514,13 @@ async def simple_chat(
         q_tokens=q_tokens,
         cutoff=cutoff,
         intent=intent,
-        static_mode=static_mode if strict_mode else None,
-        theme_keywords=theme_keywords if strict_mode else theme_keywords,
+        static_mode=static_mode,
+        theme_keywords=theme_keywords,
         topics_from_q=topics_from_q,
         newsletter_id=newsletter_id,
         nl_from_question=nl_from_question,
-        soft_mode=static_mode if not strict_mode else None,
-        soft_theme=theme_keywords if not strict_mode else [],
+        soft_mode=None,
+        soft_theme=[],
     )
 
     result = _build_response(intent, question, items, mode_label, period)
@@ -663,7 +664,12 @@ async def _fetch_articles(
         else:
             return []
 
-    result = await db.execute(stmt.order_by(Article.received_at.desc()).limit(2000))
+    # Full timeline dump for digests/search — no artificial row cap.
+    # Elaborate can stay bounded while ranking a candidate pool.
+    if intent == "elaborate":
+        result = await db.execute(stmt.order_by(Article.received_at.desc()).limit(2000))
+    else:
+        result = await db.execute(stmt.order_by(Article.received_at.desc()))
     rows = list(result.all())
 
     if newsletter_id:
@@ -681,60 +687,66 @@ async def _fetch_articles(
 
     rows = [(a, n, i) for a, n, i in rows if not _is_junk(a)]
 
-    # Strict filters (digest + mode)
-    if static_mode or theme_keywords:
+    # Hard topic / mode filters — keep every match in the selected timeline
+    topic_filters = [t for t in ([static_mode] if static_mode else []) + list(topics_from_q or []) if t]
+    if topic_filters or theme_keywords:
         filtered = [
             r for r in rows
-            if _topic_matches(r[0], [static_mode] if static_mode else [], theme_keywords)
+            if _topic_matches(r[0], topic_filters, theme_keywords or [])
         ]
+        # Only apply if we found matches; otherwise leave rows (except when mode/topic was explicit)
         if filtered:
             rows = filtered
-
-    if topics_from_q and intent == "search":
-        filtered = [r for r in rows if _topic_matches(r[0], topics_from_q, [])]
-        if filtered:
-            rows = filtered
-
-    ranked = sorted(
-        rows,
-        key=lambda r: _score_article(
-            r[0], question, q_tokens,
-            soft_mode or static_mode, soft_theme or theme_keywords, intent,
-            story_subject,
-        ),
-        reverse=True,
-    )
-
-    scores = [
-        _score_article(r[0], question, q_tokens, soft_mode or static_mode, soft_theme or theme_keywords, intent, story_subject)
-        for r in ranked
-    ]
+        elif topic_filters or theme_keywords:
+            rows = []
 
     if intent == "elaborate":
-        max_items = 1
+        ranked = sorted(
+            rows,
+            key=lambda r: _score_article(
+                r[0], question, q_tokens,
+                soft_mode or static_mode, soft_theme or theme_keywords, intent,
+                story_subject,
+            ),
+            reverse=True,
+        )
+        scores = [
+            _score_article(
+                r[0], question, q_tokens,
+                soft_mode or static_mode, soft_theme or theme_keywords, intent,
+                story_subject,
+            )
+            for r in ranked
+        ]
         min_score = 0.45 if len(q_tokens) >= 4 else 0.3
-        long_summary = True
-    elif intent == "digest":
-        max_items = MAX_DIGEST_ITEMS
-        min_score = 0.08 if (static_mode or theme_keywords) else MIN_RELEVANCE_SCORE
-        long_summary = False
+        top = [r for r, s in zip(ranked, scores) if s >= min_score][:1]
+        if not top and ranked:
+            top = ranked[:1]
     else:
-        max_items = MAX_SEARCH_ITEMS
-        min_score = MIN_RELEVANCE_SCORE
-        long_summary = False
-
-    top = [r for r, s in zip(ranked, scores) if s >= min_score][:max_items]
-
-    # Never dump all articles for weak queries
-    if not top and intent == "digest" and (static_mode or theme_keywords):
-        top = ranked[:max_items]
+        # Complete list for the timeline window — newest first, no top-N trim
+        top = sorted(
+            rows,
+            key=lambda r: r[0].received_at or r[0].published_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
 
     article_rows = [(article, newsletter_name) for article, newsletter_name, _ in top]
-    depths = ["elaborate" if intent == "elaborate" else "digest"] * len(article_rows)
-    summaries = await summarize_articles(
-        [a for a, _ in article_rows],
-        depths=depths,
-    )
+
+    from app.services.article_summary import heuristic_article_summary
+
+    if intent == "elaborate":
+        summaries = await summarize_articles(
+            [a for a, _ in article_rows],
+            depths=["elaborate"] * len(article_rows),
+        )
+    elif len(article_rows) <= LLM_SUMMARY_CAP:
+        summaries = await summarize_articles(
+            [a for a, _ in article_rows],
+            depths=["digest"] * len(article_rows),
+        )
+    else:
+        # Large complete dumps: use stored/heuristic summaries so every story is included
+        summaries = [heuristic_article_summary(a, long=False) for a, _ in article_rows]
 
     items = []
     for (article, newsletter_name), summary in zip(article_rows, summaries):
