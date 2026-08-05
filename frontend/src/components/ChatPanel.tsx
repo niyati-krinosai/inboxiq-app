@@ -8,8 +8,14 @@ import { Loader2, ExternalLink, MessageCircle, X } from "lucide-react";
 interface Message {
   role: "user" | "assistant";
   content: string;
-  response?: ChatResponse;
+  sourceUrl?: string | null;
   error?: string;
+}
+
+interface ArticleThread {
+  messages: Message[];
+  sessionId?: string;
+  loading: boolean;
 }
 
 interface ChatPanelProps {
@@ -83,14 +89,16 @@ export function ChatPanel({
   selectedLabel = null,
   tldrOnly = false,
 }: ChatPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<
+    { role: "user" | "assistant"; content: string; response?: ChatResponse; error?: string }[]
+  >([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [timeline, setTimeline] = useState(tldrOnly ? "all" : "1w");
   const [sessionId, setSessionId] = useState<string | undefined>();
-  const [pinnedArticle, setPinnedArticle] = useState<PinnedArticle | null>(null);
+  const [openArticleId, setOpenArticleId] = useState<string | null>(null);
+  const [articleThreads, setArticleThreads] = useState<Record<string, ArticleThread>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const timelineFilters = tldrOnly ? KRISHNA_TIMELINE_FILTERS : DEFAULT_TIMELINE_FILTERS;
 
@@ -120,30 +128,15 @@ export function ChatPanel({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function sendMessage(
-    question: string,
-    options?: { articleId?: string; showUserMessage?: boolean }
-  ) {
+  async function sendMessage(question: string) {
     if (!question.trim() || loading) return;
-    const articleId = options?.articleId ?? pinnedArticle?.article_id;
-    if (options?.showUserMessage !== false) {
-      setMessages((prev) => [...prev, { role: "user", content: question }]);
-    }
+    setMessages((prev) => [...prev, { role: "user", content: question }]);
     setInput("");
     setLoading(true);
     try {
-      const response = await api.chat(
-        question,
-        selectedCategory ?? undefined,
-        timeline,
-        sessionId,
-        { articleId }
-      );
+      const response = await api.chat(question, selectedCategory ?? undefined, timeline, sessionId);
       if (response.session_id) {
         setSessionId(response.session_id);
-      }
-      if (response.active_article) {
-        setPinnedArticle(response.active_article);
       }
       setMessages((prev) => [
         ...prev,
@@ -160,25 +153,77 @@ export function ChatPanel({
     }
   }
 
-  function handleAskMore(article: PinnedArticle) {
-    setPinnedArticle(article);
-    inputRef.current?.focus();
-    sendMessage(
-      "Give me a full detailed account of this story — background, what happened, implications, and limitations.",
-      { articleId: article.article_id, showUserMessage: false }
-    );
+  async function sendArticleMessage(
+    articleId: string,
+    question: string,
+    options?: { showUserMessage?: boolean }
+  ) {
+    if (!question.trim()) return;
+    const showUserMessage = options?.showUserMessage !== false;
+
+    setArticleThreads((prev) => {
+      const thread = prev[articleId] ?? { messages: [], sessionId: undefined, loading: false };
+      return {
+        ...prev,
+        [articleId]: {
+          ...thread,
+          loading: true,
+          messages: showUserMessage
+            ? [...thread.messages, { role: "user", content: question }]
+            : thread.messages,
+        },
+      };
+    });
+
+    const priorSessionId = articleThreads[articleId]?.sessionId;
+
+    try {
+      const response = await api.chat(question, selectedCategory ?? undefined, timeline, priorSessionId, {
+        articleId,
+      });
+      const item = response.items?.[0];
+      const content = item?.summary || response.brief_summary || response.headline || "No answer available.";
+      setArticleThreads((prev) => {
+        const thread = prev[articleId] ?? { messages: [], sessionId: undefined, loading: false };
+        return {
+          ...prev,
+          [articleId]: {
+            messages: [...thread.messages, { role: "assistant", content, sourceUrl: item?.url }],
+            sessionId: response.session_id ?? thread.sessionId,
+            loading: false,
+          },
+        };
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Something went wrong.";
+      setArticleThreads((prev) => {
+        const thread = prev[articleId] ?? { messages: [], sessionId: undefined, loading: false };
+        return {
+          ...prev,
+          [articleId]: {
+            ...thread,
+            loading: false,
+            messages: [...thread.messages, { role: "assistant", content: msg, error: msg }],
+          },
+        };
+      });
+    }
   }
 
-  async function clearPinnedArticle() {
-    setPinnedArticle(null);
-    if (sessionId) {
-      try {
-        await api.chat("", undefined, undefined, sessionId, {
-          clearArticleContext: true,
-        });
-      } catch {
-        /* ignore */
-      }
+  function handleAskMore(article: PinnedArticle) {
+    const id = article.article_id;
+    const alreadyStarted = Boolean(articleThreads[id]);
+    setOpenArticleId((prev) => (prev === id ? null : id));
+    if (!alreadyStarted) {
+      setArticleThreads((prev) => ({
+        ...prev,
+        [id]: { messages: [], sessionId: undefined, loading: false },
+      }));
+      void sendArticleMessage(
+        id,
+        "Give me a full detailed account of this story — background, what happened, implications, and limitations.",
+        { showUserMessage: false }
+      );
     }
   }
 
@@ -221,8 +266,8 @@ export function ChatPanel({
           <div className="mx-auto max-w-xl">
             <p className="text-sm leading-relaxed text-stone-600">
               Pick a newsletter on the left and a timeline above, then ask for a detailed
-              summary. Click <strong>Ask more</strong> on any story to deep-dive and
-              chat about it.
+              summary. Click <strong>Ask more</strong> on any story to open a chat about it
+              right beside that story.
             </p>
             <ul className="mt-6 space-y-2">
               {suggestions.map((s) => (
@@ -258,8 +303,11 @@ export function ChatPanel({
                     ) : msg.response ? (
                       <ChatResponseCard
                         response={msg.response}
+                        openArticleId={openArticleId}
+                        articleThreads={articleThreads}
                         onAskMore={handleAskMore}
-                        pinnedArticleId={pinnedArticle?.article_id}
+                        onSendArticleMessage={sendArticleMessage}
+                        onCloseArticlePopup={() => setOpenArticleId(null)}
                       />
                     ) : (
                       <p className="text-sm text-stone-600">{msg.content}</p>
@@ -280,25 +328,6 @@ export function ChatPanel({
       </div>
 
       <div className="border-t border-[var(--border)] bg-[var(--bg)] p-4">
-        {pinnedArticle && (
-          <div className="mx-auto mb-3 flex max-w-3xl items-center gap-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--accent)]/30 bg-[var(--warm)] px-3 py-2 text-sm">
-              <MessageCircle className="h-4 w-4 shrink-0 text-[var(--accent)]" />
-              <span className="shrink-0 text-stone-500">Chatting about:</span>
-              <span className="truncate font-medium text-stone-800">
-                {pinnedArticle.title}
-              </span>
-              <button
-                type="button"
-                onClick={clearPinnedArticle}
-                className="ml-auto shrink-0 rounded p-0.5 text-stone-400 hover:bg-white hover:text-stone-700"
-                aria-label="Stop chatting about this article"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -307,15 +336,12 @@ export function ChatPanel({
           className="mx-auto flex max-w-3xl gap-2"
         >
           <input
-            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              pinnedArticle
-                ? `Ask anything about "${pinnedArticle.title.slice(0, 40)}…"`
-                : selectedCategory
-                  ? `Ask about ${selectedCategory}…`
-                  : "e.g. Detailed fintech digest"
+              selectedCategory
+                ? `Ask about ${selectedCategory}…`
+                : "e.g. Detailed fintech digest"
             }
             className="flex-1 rounded-md border border-[var(--border)] bg-white px-4 py-2.5 text-sm text-stone-900 placeholder:text-stone-400 focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
             disabled={loading}
@@ -335,12 +361,18 @@ export function ChatPanel({
 
 function ChatResponseCard({
   response,
+  openArticleId,
+  articleThreads,
   onAskMore,
-  pinnedArticleId,
+  onSendArticleMessage,
+  onCloseArticlePopup,
 }: {
   response: ChatResponse;
+  openArticleId: string | null;
+  articleThreads: Record<string, ArticleThread>;
   onAskMore: (article: PinnedArticle) => void;
-  pinnedArticleId?: string;
+  onSendArticleMessage: (articleId: string, question: string) => void;
+  onCloseArticlePopup: () => void;
 }) {
   const items = response.items ?? [];
 
@@ -362,13 +394,13 @@ function ChatResponseCard({
         <ul className="space-y-6">
           {items.map((item, i) => {
             const articleId = item.article_id;
-            const isPinned = articleId && articleId === pinnedArticleId;
+            const isOpen = Boolean(articleId) && articleId === openArticleId;
             return (
               <li
                 key={articleId ?? i}
                 className={cn(
-                  "rounded-md border bg-white p-5",
-                  isPinned
+                  "relative rounded-md border bg-white p-5",
+                  isOpen
                     ? "border-[var(--accent)] ring-1 ring-[var(--accent)]/20"
                     : "border-[var(--border)]"
                 )}
@@ -386,7 +418,12 @@ function ChatResponseCard({
                           newsletter: item.newsletter,
                         })
                       }
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--border)] px-2.5 py-1 text-xs font-medium text-stone-600 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                      className={cn(
+                        "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium",
+                        isOpen
+                          ? "border-[var(--accent)] text-[var(--accent)]"
+                          : "border-[var(--border)] text-stone-600 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                      )}
                     >
                       <MessageCircle className="h-3.5 w-3.5" />
                       Ask more
@@ -424,11 +461,124 @@ function ChatResponseCard({
                     )}
                   </p>
                 )}
+
+                {isOpen && articleId && (
+                  <ArticleChatPopup
+                    title={item.title}
+                    thread={
+                      articleThreads[articleId] ?? { messages: [], loading: false }
+                    }
+                    onSend={(question) => onSendArticleMessage(articleId, question)}
+                    onClose={onCloseArticlePopup}
+                  />
+                )}
               </li>
             );
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+function ArticleChatPopup({
+  title,
+  thread,
+  onSend,
+  onClose,
+}: {
+  title: string;
+  thread: { messages: Message[]; loading: boolean };
+  onSend: (question: string) => void;
+  onClose: () => void;
+}) {
+  const [input, setInput] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [thread.messages.length, thread.loading]);
+
+  return (
+    <div className="absolute left-0 right-0 top-full z-30 mt-2 flex max-h-96 w-full flex-col overflow-hidden rounded-lg border border-[var(--accent)]/40 bg-white shadow-xl sm:left-full sm:right-auto sm:top-0 sm:mt-0 sm:ml-3 sm:w-80">
+      <div className="flex items-start justify-between gap-2 border-b border-[var(--border)] bg-[var(--warm)] px-3 py-2.5">
+        <p className="line-clamp-2 text-xs font-medium text-stone-700">{title}</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded p-0.5 text-stone-400 hover:bg-white hover:text-stone-700"
+          aria-label="Close chat"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
+        {thread.messages.map((msg, i) => (
+          <div
+            key={i}
+            className={cn(
+              "flex flex-col gap-1",
+              msg.role === "user" ? "items-end" : "items-start"
+            )}
+          >
+            {msg.role === "user" ? (
+              <div className="max-w-[85%] rounded-md bg-[var(--warm)] px-2.5 py-1.5 text-xs text-stone-800">
+                {msg.content}
+              </div>
+            ) : msg.error ? (
+              <p className="text-xs text-red-600">{msg.content}</p>
+            ) : (
+              <div className="w-full space-y-1.5 border-l-2 border-[var(--accent)] pl-2.5 text-xs leading-relaxed whitespace-pre-line text-stone-700">
+                <p>{msg.content}</p>
+                {msg.sourceUrl && (
+                  <a
+                    href={msg.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-medium text-[var(--accent)] hover:underline"
+                  >
+                    open source
+                    <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+        {thread.loading && (
+          <p className="flex items-center gap-1.5 text-xs text-stone-400">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Thinking…
+          </p>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!input.trim() || thread.loading) return;
+          onSend(input);
+          setInput("");
+        }}
+        className="flex gap-1.5 border-t border-[var(--border)] p-2"
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask a follow-up…"
+          disabled={thread.loading}
+          className="flex-1 rounded-md border border-[var(--border)] bg-white px-2.5 py-1.5 text-xs text-stone-900 placeholder:text-stone-400 focus:border-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+        />
+        <button
+          type="submit"
+          disabled={thread.loading || !input.trim()}
+          className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-hover)] disabled:opacity-40"
+        >
+          Send
+        </button>
+      </form>
     </div>
   );
 }
