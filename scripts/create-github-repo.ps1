@@ -36,11 +36,11 @@ $visibility = if ($Private) { "--private" } else { "--public" }
 
 Write-Host "Creating NEW repo: $RepoName (your other repos are untouched)" -ForegroundColor Cyan
 & $Gh repo create $RepoName $visibility `
-    --description "InboxIQ — Gmail newsletter chat desk (Vercel + FastAPI)" `
+    --description "InboxIQ - Gmail newsletter chat desk (Vercel + FastAPI)" `
     --source . `
     --remote origin `
     --push
 
 Write-Host ""
 Write-Host "Done: https://github.com/$( & $Gh api user -q .login)/$RepoName" -ForegroundColor Green
-Write-Host "Next: Render → New Blueprint → connect this repo → use render.yaml" -ForegroundColor Yellow
+Write-Host "Next: Render - New Blueprint - connect this repo - use render.yaml" -ForegroundColor Yellow

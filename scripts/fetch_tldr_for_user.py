@@ -25,13 +25,17 @@ from app.services.gmail_sync import _collect_message_ids, discover_and_import_me
 from app.services.google_oauth import get_gmail_service
 from app.services.pipeline import run_light_pipeline_batch
 
-# Broad TLDR discovery — all product lines from tldrnewsletter.com / tldr.tech
+# Broad TLDR discovery — all product lines, all mailboxes, long history
 TLDR_QUERIES = [
-    "from:(tldrnewsletter.com OR tldr.tech)",
-    "from:(dan@tldrnewsletter.com OR hello@tldrnewsletter.com OR team@tldrnewsletter.com)",
-    'from:tldrnewsletter.com subject:(TLDR OR "TLDR AI" OR "TLDR Tech" OR "TLDR Founders" OR "TLDR Marketing" OR "TLDR Design" OR "TLDR Crypto" OR "TLDR Web Dev" OR "TLDR InfoSec" OR "TLDR Product" OR "TLDR DevOps")',
-    "from:(*@tldrnewsletter.com OR *@tldr.tech)",
+    "in:anywhere from:tldrnewsletter.com",
+    "in:anywhere from:tldr.tech",
+    "from:tldrnewsletter.com",
+    "from:tldr.tech",
     "list:tldrnewsletter.com OR list:tldr.tech",
+    "newer_than:5y from:tldrnewsletter.com",
+    "newer_than:5y from:tldr.tech",
+    "from:(dan@tldrnewsletter.com OR hello@tldrnewsletter.com OR team@tldrnewsletter.com OR news@tldrnewsletter.com OR ai@tldrnewsletter.com)",
+    "from:tldr subject:TLDR",
 ]
 
 
