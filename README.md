@@ -19,15 +19,14 @@ Transform your Gmail newsletter subscriptions into a searchable, conversational 
 1. [How it works](#how-it-works)
 2. [Services used](#services-used)
 3. [Tech stack](#tech-stack)
-4. [Repository structure](#repository-structure)
-5. [Local setup](#local-setup)
-6. [Environment variables](#environment-variables)
-7. [Production deployment](#production-deployment)
-8. [API reference](#api-reference)
-9. [Operational scripts](#operational-scripts)
-10. [CI/CD](#cicd)
-11. [Design constraints](#design-constraints)
-12. [Troubleshooting](#troubleshooting)
+4. [Local setup](#local-setup)
+5. [Environment variables](#environment-variables)
+6. [Production deployment](#production-deployment)
+7. [API reference](#api-reference)
+8. [Operational scripts](#operational-scripts)
+9. [CI/CD](#cicd)
+10. [Design constraints](#design-constraints)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -102,43 +101,6 @@ Two execution modes exist, controlled by env vars:
 | Auth | Google OAuth 2.0, JWT session tokens (`python-jose`), Fernet-encrypted refresh tokens at rest |
 | AI | OpenAI SDK — works against OpenAI or OpenRouter (extraction, embeddings, chat) |
 | Infra | Docker Compose (local), Render Blueprint (backend + DB), Vercel (frontend) |
-
-## Repository structure
-
-```
-InboxIQ/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── routes.py          # auth, sync, newsletters, timeline, search, chat, categories
-│   │   │   ├── intelligence.py    # events, comparisons, research mode, digest, analytics, profile
-│   │   │   ├── knowledge.py       # event history/conflicts, taxonomy, prompt registry, connectors
-│   │   │   └── operations.py      # pipeline dashboard, costs, corrections, Gmail webhook, admin
-│   │   ├── connectors/            # pluggable source connectors (Gmail today; base for others)
-│   │   ├── models/                # SQLAlchemy models (users, articles, events, taxonomy, ...)
-│   │   ├── providers/             # LLM provider abstraction (OpenAI/OpenRouter)
-│   │   ├── services/              # sync, discovery, parsing, extraction, dedup, chat, etc. (see above)
-│   │   ├── workers/                # Celery app + tasks + streaming pipeline
-│   │   ├── config.py               # Settings (env-driven, see below)
-│   │   └── main.py                 # FastAPI app, CORS, DB bootstrap, router mounting
-│   ├── evals/                      # extraction/chat quality eval suite (run in CI)
-│   ├── tests/                      # pytest suite
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/
-│   └── src/
-│       ├── app/
-│       │   ├── page.tsx              # landing / sign-in
-│       │   ├── auth/callback/page.tsx
-│       │   ├── dashboard/page.tsx    # main app (chat, timeline, sources)
-│       │   └── api/v1/[...path]/route.ts  # server-side proxy to BACKEND_URL
-│       ├── components/
-│       └── lib/                      # api-base.ts, api client, utils
-├── scripts/                          # deploy + ops helpers (see below)
-├── .github/workflows/ci.yml          # backend compile check, eval suite, pytest
-├── docker-compose.yml                # postgres (pgvector) + redis + api, for local full-stack
-└── render.yaml                       # Render Blueprint: web service + managed Postgres
-```
 
 ## Local setup
 
